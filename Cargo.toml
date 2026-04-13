@@ -1,0 +1,14 @@
+[package]
+name = "dig-constants"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75.0"
+description = "DIG network constants — genesis challenge, consensus parameters, and network configuration"
+license = "MIT"
+authors = ["DIG Network"]
+
+[dependencies]
+chia-consensus = "0.26"
+chia-protocol = "0.26"
+chia-bls = "0.26"
+hex-literal = "0.4"

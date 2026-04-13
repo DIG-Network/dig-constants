@@ -1,0 +1,7 @@
+C:\Users\micha\workspace\dig_network\dig-constants\target\debug\deps\chia_traits-78a91fbbaf1ba4ca.d: C:\Users\micha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chia-traits-0.22.0\src\lib.rs C:\Users\micha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chia-traits-0.22.0\src\chia_error.rs C:\Users\micha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chia-traits-0.22.0\src\streamable.rs
+
+C:\Users\micha\workspace\dig_network\dig-constants\target\debug\deps\libchia_traits-78a91fbbaf1ba4ca.rmeta: C:\Users\micha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chia-traits-0.22.0\src\lib.rs C:\Users\micha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chia-traits-0.22.0\src\chia_error.rs C:\Users\micha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chia-traits-0.22.0\src\streamable.rs
+
+C:\Users\micha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chia-traits-0.22.0\src\lib.rs:
+C:\Users\micha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chia-traits-0.22.0\src\chia_error.rs:
+C:\Users\micha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chia-traits-0.22.0\src\streamable.rs:

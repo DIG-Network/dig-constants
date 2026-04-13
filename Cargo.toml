@@ -6,6 +6,7 @@ rust-version = "1.75.0"
 description = "DIG network constants — genesis challenge, consensus parameters, and network configuration"
 license = "MIT"
 authors = ["DIG Network"]
+repository = "https://github.com/DIG-Network/dig-constants"
 
 [dependencies]
 chia-consensus = "0.26"

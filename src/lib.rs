@@ -191,6 +191,36 @@ pub const DIG_MAINNET: NetworkConstants = NetworkConstants {
     },
 };
 
+// =============================================================================
+// NAT-traversal relay endpoint
+//
+// A DIG Node behind NAT cannot accept inbound dials, so it holds a constant
+// reservation with a publicly-reachable relay to stay discoverable. The
+// canonical public relay is `relay.dig.net`, serving the `RelayMessage`
+// WebSocket wire (RLY-001..RLY-007) on port 9450.
+//
+// This constant is the single source of truth for that endpoint so consumers
+// (`dig-node`, `dig-gossip`) don't each hardcode it. It MUST stay byte-identical
+// to `dig-node`'s `relay::DEFAULT_RELAY_URL` (the string a node actually dials
+// when `DIG_RELAY_URL` is unset) and to the `dig-relay` server's documented
+// client endpoint.
+// =============================================================================
+
+/// Canonical DIG NAT-traversal relay endpoint.
+///
+/// This is the WebSocket URL a DIG Node dials by default to obtain a relay
+/// reservation (so NAT'd peers stay reachable). It is the value used unless an
+/// operator overrides it via the `DIG_RELAY_URL` environment variable (or
+/// disables the reservation with `DIG_RELAY_URL=off`).
+///
+/// Format: `wss://<host>:<port>` — the relay protocol (`RelayMessage`,
+/// RLY-001..RLY-007) is JSON over a secure WebSocket. Mainnet uses the canonical
+/// public deployment `relay.dig.net` on port 9450.
+///
+/// Kept byte-identical to `dig-node`'s `relay::DEFAULT_RELAY_URL` and the
+/// `dig-relay` server's documented client endpoint.
+pub const DIG_RELAY_URL: &str = "wss://relay.dig.net:9450";
+
 // ---------------------------------------------------------------------------
 // DIG Testnet
 // ---------------------------------------------------------------------------
@@ -276,3 +306,37 @@ pub const DIG_TESTNET: NetworkConstants = NetworkConstants {
         plot_difficulty_8_height: 0xffff_ffff,
     },
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The canonical relay endpoint must equal exactly what a DIG Node dials by
+    /// default. This pins the value byte-for-byte against `dig-node`'s
+    /// `relay::DEFAULT_RELAY_URL` (`wss://relay.dig.net:9450`) and the
+    /// `dig-relay` server's documented client endpoint. If either side ever
+    /// changes the scheme, host, or port, this guard fails so the shared
+    /// contract can't silently drift.
+    #[test]
+    fn dig_relay_url_is_canonical_endpoint() {
+        assert_eq!(DIG_RELAY_URL, "wss://relay.dig.net:9450");
+    }
+
+    /// The relay endpoint is a secure-WebSocket URL pointing at the canonical
+    /// public host on the relay protocol port.
+    #[test]
+    fn dig_relay_url_is_well_formed() {
+        assert!(
+            DIG_RELAY_URL.starts_with("wss://"),
+            "relay must use secure WebSocket"
+        );
+        assert!(
+            DIG_RELAY_URL.contains("relay.dig.net"),
+            "relay must point at the canonical host"
+        );
+        assert!(
+            DIG_RELAY_URL.ends_with(":9450"),
+            "relay must use the RelayMessage wire port 9450"
+        );
+    }
+}

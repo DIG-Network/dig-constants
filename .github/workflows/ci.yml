@@ -70,8 +70,13 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: cargo test --workspace
-        run: cargo test --workspace --all-features
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: cargo nextest run --workspace (flaky-aware, retries=2)
+        # nextest retries a failing test up to 2x and reports failed-then-passed
+        # tests as "flaky" in its summary — surfaces flake without hiding it.
+        run: cargo nextest run --workspace --all-features --retries 2
 
   coverage:
     name: Coverage (measure-only)

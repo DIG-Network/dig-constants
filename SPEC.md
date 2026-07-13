@@ -18,9 +18,9 @@ canonical NAT-traversal relay endpoint — as compile-time constants.
 
 1.2. The crate exists so that ANY DIG crate can import network constants without pulling in
 the CLVM engine or other heavy dependencies. Its dependency set is deliberately minimal:
-`chia-consensus`, `chia-protocol`, `chia-bls` (all pinned to the `0.26` line) and
-`hex-literal`. Implementations MUST NOT add heavyweight dependencies (CLVM execution,
-networking, async runtimes) to this crate.
+`chia-consensus` and `chia-protocol` (both pinned to the `0.26` line) and `hex-literal`.
+Implementations MUST NOT add heavyweight dependencies (CLVM execution, networking, async
+runtimes) to this crate.
 
 1.3. This crate is a leaf library: it performs no I/O, holds no state, and has no runtime
 configuration. Every exported value is a `const` or a pure accessor over one.
@@ -43,6 +43,7 @@ accompanied by a semver-major version bump.
 | `DIG_MAINNET` | `pub const NetworkConstants` | DIG mainnet parameters (§3, §5) |
 | `DIG_TESTNET` | `pub const NetworkConstants` | DIG testnet parameters (§3, §5) |
 | `DIG_RELAY_URL` | `pub const &str` | Canonical NAT-traversal relay endpoint (§6) |
+| `DIG_NODE_PORT` | `pub const u16` | Default localhost port for client→node connection (§7) |
 
 2.1. `NetworkConstants`'s field is private. Consumers MUST reach the underlying
 `ConsensusConstants` only via `consensus()`; the wrapper's accessors are the stable
@@ -179,12 +180,36 @@ relay URL compiled into `dig-node` (its `relay` module's `DEFAULT_RELAY_URL`) an
 `dig-relay` server's documented client endpoint. A change to scheme, host, or port is a
 coordinated cross-repo protocol change, never a unilateral edit here.
 
-## 7. Invariants and error behavior
+## 7. Default node localhost port — `DIG_NODE_PORT`
 
-7.1. The crate has no fallible API: no function returns `Result`, panics, or performs I/O.
+7.1. `DIG_NODE_PORT` is the u16 constant:
+
+```
+9778
+```
+
+7.2. This is the single source of truth for the default localhost port a client uses to reach
+a local DIG node (per §5.3 client→node connection order). When a client resolves `dig.local`
+or `localhost`, it dials this port to reach the installed local DIG node. The constants ensures
+all consumers (dig-node, dig-dns, dig-installer, dig-sdk, digstore CLI) use an identical port,
+preventing port-mismatch bugs and silent failures.
+
+7.3. Format contract: the value MUST be `9778`. The crate's test suite pins this constant
+byte-for-byte.
+
+7.4. Override semantics (defined by the consumer, stated here for the contract): a client uses
+`DIG_NODE_PORT` unless explicitly configured with a custom node URL.
+
+7.5. Cross-repo conformance: this constant MUST remain byte-identical to the port the `dig-node`
+service binds on localhost and to the port the `dig-installer` registers for `dig.local`. A
+change to the port is a coordinated cross-repo protocol change, never a unilateral edit here.
+
+## 8. Invariants and error behavior
+
+8.1. The crate has no fallible API: no function returns `Result`, panics, or performs I/O.
 All values are compile-time constants; misuse is impossible at runtime.
 
-7.2. Invariants that MUST hold in every release:
+8.2. Invariants that MUST hold in every release:
 
 - I-1: `agg_sig_me_additional_data == genesis_challenge` for each network.
 - I-2: every other `agg_sig_*_additional_data == sha256(genesis_challenge || opcode_byte)`
@@ -193,33 +218,35 @@ All values are compile-time constants; misuse is impossible at runtime.
 - I-4: mainnet and testnet agree on every non-genesis-derived field (§5).
 - I-5: `DIG_RELAY_URL == "wss://relay.dig.net:9450"` (until a coordinated cross-repo change
   per §6.5).
-- I-6: the `chia-consensus`/`chia-protocol`/`chia-bls` dependency versions move in
-  lockstep (currently the `0.26` line); a `ConsensusConstants` layout change upstream is a
-  breaking change here and requires a semver-major bump.
+- I-6: `DIG_NODE_PORT == 9778` (the default localhost port; until a coordinated cross-repo
+  change per §7).
+- I-7: the `chia-consensus`/`chia-protocol` dependency versions move in lockstep (currently
+  the `0.26` line); a `ConsensusConstants` layout change upstream is a breaking change here
+  and requires a semver-major bump.
 
-## 8. Versioning and compatibility
+## 9. Versioning and compatibility
 
-8.1. The crate follows semver. Additive changes (new constants, new accessors, new
+9.1. The crate follows semver. Additive changes (new constants, new accessors, new
 networks) are minor; removing/renaming an export, changing any published constant value,
 or bumping the `chia-*` dependency line is major-worthy because downstream signature and
 validation behavior depends on exact values.
 
-8.2. Changing the mainnet genesis challenge at launch (§3.2) is the one planned
+9.2. Changing the mainnet genesis challenge at launch (§3.2) is the one planned
 value-changing event; it MUST recompute all §4 values in the same commit and ship as a new
 version that all consumers adopt together.
 
-## 9. Release and CI gates
+## 10. Release and CI gates
 
-9.1. Releases are tag-driven: pushing a `v*` tag (or a manual `workflow_dispatch`) runs the
+10.1. Releases are tag-driven: pushing a `v*` tag (or a manual `workflow_dispatch`) runs the
 `Publish to crates.io` workflow, which gates on `cargo fmt --check`,
 `cargo clippy --all-targets --all-features -D warnings`, `cargo test --all-features`, and
 `cargo doc --no-deps`, then publishes to crates.io (secret `CARGO_REGISTRY_TOKEN`) and
 creates a GitHub Release. A release whose test job fails MUST NOT publish.
 
-9.2. There is no CI workflow on plain pushes to `main`; the gates in §9.1 run on release
+10.2. There is no CI workflow on plain pushes to `main`; the gates in §10.1 run on release
 tags and manual dispatch.
 
-## 10. Conformance summary
+## 11. Conformance summary
 
 | # | Requirement | Level |
 |---|---|---|
@@ -230,6 +257,7 @@ tags and manual dispatch.
 | C-5 | Only §3–§5.1 fields carry DIG semantics; PoS/VDF fields are inert filler | MUST NOT rely |
 | C-6 | `DIG_RELAY_URL` byte-identical to `dig-node`'s default and `dig-relay`'s endpoint | MUST |
 | C-7 | Relay endpoint uses `wss://`, host `relay.dig.net`, port `9450` | MUST |
-| C-8 | Constant-value changes ship as coordinated semver-major releases | MUST |
-| C-9 | Crate stays dependency-light (no CLVM engine / networking / async runtime) | MUST |
-| C-10 | Release publishes only after fmt/clippy/test/doc gates pass | MUST |
+| C-8 | `DIG_NODE_PORT == 9778` (client→node localhost connection port) | MUST |
+| C-9 | Constant-value changes ship as coordinated semver-major releases | MUST |
+| C-10 | Crate stays dependency-light (no CLVM engine / networking / async runtime) | MUST |
+| C-11 | Release publishes only after fmt/clippy/test/doc gates pass | MUST |

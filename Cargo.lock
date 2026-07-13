@@ -344,9 +344,8 @@ dependencies = [
 
 [[package]]
 name = "dig-constants"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
- "chia-bls 0.26.0",
  "chia-consensus",
  "chia-protocol",
  "hex-literal",

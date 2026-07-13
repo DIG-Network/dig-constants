@@ -221,6 +221,26 @@ pub const DIG_MAINNET: NetworkConstants = NetworkConstants {
 /// `dig-relay` server's documented client endpoint.
 pub const DIG_RELAY_URL: &str = "wss://relay.dig.net:9450";
 
+// =============================================================================
+// DIG Node localhost endpoint
+//
+// A client connecting to a local DIG node (§5.3 client→node connection order)
+// resolves `dig.local` or `localhost` to reach the node via localhost TCP on
+// port 9778. This constant is the single source of truth for that port so
+// consumers (dig-node, dig-dns, dig-installer, SDK, CLI) don't each hardcode it.
+// =============================================================================
+
+/// The default localhost port a client uses to reach the local DIG node.
+///
+/// This is used to implement §5.3 client→node connection order: when a client
+/// needs to connect to a DIG node, it tries `dig.local` and `localhost` on this
+/// port before falling back to the public `rpc.dig.net` gateway. This constant
+/// ensures all consumers (dig-node, dig-dns, dig-installer, dig-sdk, digstore CLI)
+/// use an identical port, preventing port-mismatch bugs. It MUST stay byte-identical
+/// to `dig-node`'s documented localhost serve port and the installer's registered
+/// `dig.local` address.
+pub const DIG_NODE_PORT: u16 = 9778;
+
 // ---------------------------------------------------------------------------
 // DIG Testnet
 // ---------------------------------------------------------------------------
@@ -338,5 +358,15 @@ mod tests {
             DIG_RELAY_URL.ends_with(":9450"),
             "relay must use the RelayMessage wire port 9450"
         );
+    }
+
+    /// The DIG node localhost port must equal the expected default.
+    ///
+    /// This guards against accidental mutations and ensures all consumers
+    /// (dig-node, dig-dns, dig-installer, dig-sdk, digstore) use a consistent
+    /// port when connecting to the local node on `dig.local` or `localhost`.
+    #[test]
+    fn dig_node_port_is_canonical() {
+        assert_eq!(DIG_NODE_PORT, 9778);
     }
 }

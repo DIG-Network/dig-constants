@@ -82,16 +82,19 @@ impl NetworkConstants {
 // The genesis challenge is the 32-byte consensus anchor for the DIG L2 network.
 // It doubles as the gossip `network_id` gate: `dig-gossip` REJECTS an all-zero
 // network_id, so this value MUST be non-zero for the node's gossip pool / DHT /
-// PEX to start. It is therefore a canonical, deterministic, reproducible value
-// derived from a fixed documented preimage (NOT random bytes):
+// PEX to start.
 //
-//   DIG_MAINNET_GENESIS_CHALLENGE = sha256(b"DIG_MAINNET:genesis:v1")
-//     = 3c52e26fc23988f82b521880b15f39954c574c1adb035f54591b72055f6956be
+// DIG_MAINNET L2 genesis = the Chia mainnet header hash @ height 9,021,277
+//   (0af981...1abf), pinned 2026-07-17 — anchors the DIG L2 genesis to a real,
+//   verifiable Chia block (captured via coinset.org get_blockchain_state).
+//
+//   DIG_MAINNET_GENESIS_CHALLENGE
+//     = 0af981862a4df51f51ec59c312315d959931d917c375730b89b9e2b0854d1abf
 //
 // This is the PRE-LAUNCH canonical DIG mainnet genesis. Per CLAUDE.md §3.7 the
 // ecosystem is pre-release with no live users, so this value is revisable at
-// true mainnet launch — bump the preimage version (`:v2`) and recompute every
-// derived value below if it is ever re-anchored.
+// true mainnet launch — re-anchor to the launch-time Chia header hash and
+// recompute every derived value below if it is ever changed.
 //
 // All `agg_sig_*_additional_data` values are derived from this genesis as
 // `sha256(genesis_challenge || opcode_byte)` (AGG_SIG_ME = genesis directly),
@@ -100,12 +103,13 @@ impl NetworkConstants {
 
 /// Canonical DIG mainnet genesis challenge.
 ///
-/// Deterministically derived as `sha256(b"DIG_MAINNET:genesis:v1")` so anyone
-/// can reproduce it. This is the pre-launch canonical value; per §3.7 it is
-/// revisable at true mainnet launch. All `agg_sig_*_additional_data` fields are
-/// derived from this.
+/// The Chia mainnet header hash at block height 9,021,277 (`0af981…1abf`),
+/// pinned 2026-07-17 — a real, verifiable, fixed 32-byte value anchoring the
+/// DIG L2 genesis to a real Chia block. This is the pre-launch canonical value;
+/// per §3.7 it is revisable at true mainnet launch. All
+/// `agg_sig_*_additional_data` fields are derived from this.
 const DIG_MAINNET_GENESIS_CHALLENGE: [u8; 32] =
-    hex!("3c52e26fc23988f82b521880b15f39954c574c1adb035f54591b72055f6956be");
+    hex!("0af981862a4df51f51ec59c312315d959931d917c375730b89b9e2b0854d1abf");
 
 /// DIG mainnet constants.
 ///
@@ -127,22 +131,22 @@ pub const DIG_MAINNET: NetworkConstants = NetworkConstants {
         // NOTE: Recompute ALL values when genesis_challenge is finalized.
         agg_sig_me_additional_data: Bytes32::new(DIG_MAINNET_GENESIS_CHALLENGE),
         agg_sig_parent_additional_data: Bytes32::new(hex!(
-            "f9d47f4a0151514b0aedfb9601e9518a7bc62bd2f3c3ad22df242bc8756fce65"
+            "196d63b6dfbd4440656f9c1eadc686cacfaae771c565762a8cd6e51c892a0077"
         )),
         agg_sig_puzzle_additional_data: Bytes32::new(hex!(
-            "d1d4ec69b8ace48f94d9c0896d15ee8d017f1803ae57be045e9e043f7b280bf4"
+            "9ca719659b5e2355a91ff330c8612cb58c74f1063eaff99e507602d450b1f71f"
         )),
         agg_sig_amount_additional_data: Bytes32::new(hex!(
-            "3a5ca9817b7e8f9f497c48f90048458fa4bb296c15bd5d0c25fcbec4a40b8cc5"
+            "d13767da4a8bd9520dbd9e039e68b3eb4b16fdcbb7e7755b5064840eaeb553ce"
         )),
         agg_sig_puzzle_amount_additional_data: Bytes32::new(hex!(
-            "72376495dda328e6621894099949090eccd04e2768fa2a0af4f25ca36bbe5079"
+            "73eea3473bd0daa28793d4bcd218ade462b634b53af97f9a01a91f3059ac75df"
         )),
         agg_sig_parent_amount_additional_data: Bytes32::new(hex!(
-            "783345440738d69ce52bafcfa4d6fbef1ed810e217c35288962ec1b3e42136f3"
+            "eb7302224e77c0f269d0c8b105d4cc786775ae012ed2db49751c33c244c3f647"
         )),
         agg_sig_parent_puzzle_additional_data: Bytes32::new(hex!(
-            "dcdfb533e4d4ccb7f0539ca608e0e04b4054b19993ca2eafe86dd93b3df05b44"
+            "ccac5983685257d50ee7b439bbb502128ddb262813dde4e4a11ac6cdfc66fa8e"
         )),
 
         // DIG L2 cost limits
@@ -424,13 +428,15 @@ mod tests {
         assert_ne!(DIG_TESTNET.genesis_challenge(), Bytes32::new([0u8; 32]));
     }
 
-    /// Each genesis challenge equals `sha256` of its documented preimage, so
-    /// anyone can reproduce it and it is provably not random.
+    /// The mainnet genesis is pinned to the Chia mainnet header hash @ height
+    /// 9,021,277 (a real anchored value), and the testnet genesis is the
+    /// reproducible `sha256` of its documented preimage. These pin both values
+    /// byte-for-byte so neither can silently drift.
     #[test]
-    fn genesis_challenges_derive_from_documented_preimages() {
+    fn genesis_challenges_are_the_pinned_values() {
         assert_eq!(
             DIG_MAINNET_GENESIS_CHALLENGE,
-            sha256(b"DIG_MAINNET:genesis:v1"),
+            hex_literal::hex!("0af981862a4df51f51ec59c312315d959931d917c375730b89b9e2b0854d1abf"),
         );
         assert_eq!(
             DIG_TESTNET_GENESIS_CHALLENGE,

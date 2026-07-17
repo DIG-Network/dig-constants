@@ -58,18 +58,20 @@ time and identical in every build of a given crate version.
 AGG_SIG additional-data values derived from it (§4); every other parameter (§5) is
 identical between the two.
 
-| Network | Genesis challenge (32 bytes, hex) | Derivation preimage |
+| Network | Genesis challenge (32 bytes, hex) | Source |
 |---|---|---|
-| `DIG_MAINNET` | `3c52e26fc23988f82b521880b15f39954c574c1adb035f54591b72055f6956be` | `sha256(b"DIG_MAINNET:genesis:v1")` |
+| `DIG_MAINNET` | `0af981862a4df51f51ec59c312315d959931d917c375730b89b9e2b0854d1abf` | Chia mainnet header hash @ height 9,021,277, pinned 2026-07-17 |
 | `DIG_TESTNET` | `088c18d6b7859d885dc2f03166e862c958f74b63b6353c3df71d103b9b806c3b` | `sha256(b"DIG_TESTNET:genesis:v1")` |
 
-3.2. **Canonical, deterministic, pre-launch value.** Each genesis challenge is derived
-reproducibly as `sha256` of a fixed documented preimage (above) — never random bytes — so it
-is non-zero (the gossip `network_id` gate rejects an all-zero id) and any party can reproduce
-it. This is the PRE-LAUNCH canonical value. Per the ecosystem's pre-release status it is
-revisable at true mainnet launch: if re-anchored, bump the preimage version (`:v2`) and
-recompute every `agg_sig_*_additional_data` value per §4. Consumers MUST NOT treat signatures
-or coins bound to this pre-launch domain as launch-final network state.
+3.2. **Canonical, real-anchored, pre-launch values.** The mainnet genesis anchors the DIG L2
+genesis to a real, verifiable Chia block — the Chia mainnet peak header hash at block height
+9,021,277 (`0af981…1abf`), captured 2026-07-17 via coinset.org `get_blockchain_state`. The
+testnet genesis is the reproducible `sha256` of a fixed documented preimage. Both are non-zero
+(the gossip `network_id` gate rejects an all-zero id) and independently verifiable. These are
+the PRE-LAUNCH canonical values. Per the ecosystem's pre-release status they are revisable at
+true mainnet launch: if re-anchored (mainnet → the launch-time Chia header hash; testnet →
+`:v2`), every `agg_sig_*_additional_data` value MUST be recomputed per §4. Consumers MUST NOT
+treat signatures or coins bound to this pre-launch domain as launch-final network state.
 
 3.3. A transaction signed for one network is invalid on the other: because the AGG_SIG
 additional data differs per network (§4), BLS signatures do not verify across the
@@ -101,17 +103,17 @@ separators (reference: `chia-blockchain` `chia/consensus/condition_tools.py`, li
 genesis challenge. The current values (which do satisfy the rule for the §3 genesis
 challenges) are:
 
-**DIG mainnet** (genesis = `3c52e26f…56be`):
+**DIG mainnet** (genesis = `0af981…1abf`):
 
 | Field | Value (hex) |
 |---|---|
-| `agg_sig_me_additional_data` | `3c52e26fc23988f82b521880b15f39954c574c1adb035f54591b72055f6956be` |
-| `agg_sig_parent_additional_data` | `f9d47f4a0151514b0aedfb9601e9518a7bc62bd2f3c3ad22df242bc8756fce65` |
-| `agg_sig_puzzle_additional_data` | `d1d4ec69b8ace48f94d9c0896d15ee8d017f1803ae57be045e9e043f7b280bf4` |
-| `agg_sig_amount_additional_data` | `3a5ca9817b7e8f9f497c48f90048458fa4bb296c15bd5d0c25fcbec4a40b8cc5` |
-| `agg_sig_puzzle_amount_additional_data` | `72376495dda328e6621894099949090eccd04e2768fa2a0af4f25ca36bbe5079` |
-| `agg_sig_parent_amount_additional_data` | `783345440738d69ce52bafcfa4d6fbef1ed810e217c35288962ec1b3e42136f3` |
-| `agg_sig_parent_puzzle_additional_data` | `dcdfb533e4d4ccb7f0539ca608e0e04b4054b19993ca2eafe86dd93b3df05b44` |
+| `agg_sig_me_additional_data` | `0af981862a4df51f51ec59c312315d959931d917c375730b89b9e2b0854d1abf` |
+| `agg_sig_parent_additional_data` | `196d63b6dfbd4440656f9c1eadc686cacfaae771c565762a8cd6e51c892a0077` |
+| `agg_sig_puzzle_additional_data` | `9ca719659b5e2355a91ff330c8612cb58c74f1063eaff99e507602d450b1f71f` |
+| `agg_sig_amount_additional_data` | `d13767da4a8bd9520dbd9e039e68b3eb4b16fdcbb7e7755b5064840eaeb553ce` |
+| `agg_sig_puzzle_amount_additional_data` | `73eea3473bd0daa28793d4bcd218ade462b634b53af97f9a01a91f3059ac75df` |
+| `agg_sig_parent_amount_additional_data` | `eb7302224e77c0f269d0c8b105d4cc786775ae012ed2db49751c33c244c3f647` |
+| `agg_sig_parent_puzzle_additional_data` | `ccac5983685257d50ee7b439bbb502128ddb262813dde4e4a11ac6cdfc66fa8e` |
 
 **DIG testnet** (genesis = `088c18d6…6c3b`):
 
@@ -234,9 +236,10 @@ networks) are minor; removing/renaming an export, changing any published constan
 or bumping the `chia-*` dependency line is major-worthy because downstream signature and
 validation behavior depends on exact values.
 
-9.2. Re-anchoring a genesis challenge at true launch (§3.2 — bumping the derivation preimage
-to `:v2`) is the one planned value-changing event; it MUST recompute all §4 values in the
-same commit and ship as a new version that all consumers adopt together.
+9.2. Re-anchoring a genesis challenge at true launch (§3.2 — mainnet to the launch-time Chia
+header hash, testnet to a `:v2` preimage) is the one planned value-changing event; it MUST
+recompute all §4 values in the same commit and ship as a new version that all consumers adopt
+together.
 
 ## 10. Release and CI gates
 
@@ -255,7 +258,7 @@ tags and manual dispatch.
 |---|---|---|
 | C-1 | AGG_SIG_ME additional data equals the genesis challenge | MUST |
 | C-2 | Other AGG_SIG additional data equal `sha256(genesis \|\| opcode_byte)` (opcodes 43–48) | MUST |
-| C-3 | Genesis challenges are `sha256` of their documented preimage (non-zero, reproducible); re-anchoring recomputes all §4 values | MUST |
+| C-3 | Genesis challenges are non-zero, verifiable pinned values (mainnet = Chia header hash @ 9,021,277; testnet = `sha256` of preimage); re-anchoring recomputes all §4 values | MUST |
 | C-4 | Consumers select a network by constant; never mix mainnet/testnet values | MUST |
 | C-5 | Only §3–§5.1 fields carry DIG semantics; PoS/VDF fields are inert filler | MUST NOT rely |
 | C-6 | `DIG_RELAY_URL` byte-identical to `dig-node`'s default and `dig-relay`'s endpoint | MUST |

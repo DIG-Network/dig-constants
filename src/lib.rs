@@ -79,17 +79,33 @@ impl NetworkConstants {
 // ---------------------------------------------------------------------------
 // DIG Mainnet
 //
-// TODO: Replace placeholder genesis challenge with the real DIG mainnet value
-// once the network is launched. All agg_sig_*_additional_data values must be
-// recomputed as sha256(genesis_challenge || opcode_byte) at that time.
+// The genesis challenge is the 32-byte consensus anchor for the DIG L2 network.
+// It doubles as the gossip `network_id` gate: `dig-gossip` REJECTS an all-zero
+// network_id, so this value MUST be non-zero for the node's gossip pool / DHT /
+// PEX to start. It is therefore a canonical, deterministic, reproducible value
+// derived from a fixed documented preimage (NOT random bytes):
+//
+//   DIG_MAINNET_GENESIS_CHALLENGE = sha256(b"DIG_MAINNET:genesis:v1")
+//     = 3c52e26fc23988f82b521880b15f39954c574c1adb035f54591b72055f6956be
+//
+// This is the PRE-LAUNCH canonical DIG mainnet genesis. Per CLAUDE.md §3.7 the
+// ecosystem is pre-release with no live users, so this value is revisable at
+// true mainnet launch — bump the preimage version (`:v2`) and recompute every
+// derived value below if it is ever re-anchored.
+//
+// All `agg_sig_*_additional_data` values are derived from this genesis as
+// `sha256(genesis_challenge || opcode_byte)` (AGG_SIG_ME = genesis directly),
+// so they were all recomputed for this genesis.
 // ---------------------------------------------------------------------------
 
-/// Placeholder DIG mainnet genesis challenge.
+/// Canonical DIG mainnet genesis challenge.
 ///
-/// This MUST be replaced with the real value before mainnet launch.
-/// All `agg_sig_*_additional_data` fields are derived from this.
+/// Deterministically derived as `sha256(b"DIG_MAINNET:genesis:v1")` so anyone
+/// can reproduce it. This is the pre-launch canonical value; per §3.7 it is
+/// revisable at true mainnet launch. All `agg_sig_*_additional_data` fields are
+/// derived from this.
 const DIG_MAINNET_GENESIS_CHALLENGE: [u8; 32] =
-    hex!("0000000000000000000000000000000000000000000000000000000000000000");
+    hex!("3c52e26fc23988f82b521880b15f39954c574c1adb035f54591b72055f6956be");
 
 /// DIG mainnet constants.
 ///
@@ -111,22 +127,22 @@ pub const DIG_MAINNET: NetworkConstants = NetworkConstants {
         // NOTE: Recompute ALL values when genesis_challenge is finalized.
         agg_sig_me_additional_data: Bytes32::new(DIG_MAINNET_GENESIS_CHALLENGE),
         agg_sig_parent_additional_data: Bytes32::new(hex!(
-            "978722459e638504a3c4ed25b0eae952f1cba668de5a44ccbb3b311eb6901218"
+            "f9d47f4a0151514b0aedfb9601e9518a7bc62bd2f3c3ad22df242bc8756fce65"
         )),
         agg_sig_puzzle_additional_data: Bytes32::new(hex!(
-            "b5b75cf3f16babd124b3c36ac239db038cf9384b6f4343ab65121e7994fa87e4"
+            "d1d4ec69b8ace48f94d9c0896d15ee8d017f1803ae57be045e9e043f7b280bf4"
         )),
         agg_sig_amount_additional_data: Bytes32::new(hex!(
-            "568b7e86b93e78c4a70a90902134266d5f666400d449c827c32422c14a8df42a"
+            "3a5ca9817b7e8f9f497c48f90048458fa4bb296c15bd5d0c25fcbec4a40b8cc5"
         )),
         agg_sig_puzzle_amount_additional_data: Bytes32::new(hex!(
-            "73f82ca7a07025c76c91a3faf2e574ffa13759597fc5d9a0573b4df70245de2e"
+            "72376495dda328e6621894099949090eccd04e2768fa2a0af4f25ca36bbe5079"
         )),
         agg_sig_parent_amount_additional_data: Bytes32::new(hex!(
-            "3a2914bb834c69f745c1932450bad277f975b3e1b246d003e3a53e550cf74936"
+            "783345440738d69ce52bafcfa4d6fbef1ed810e217c35288962ec1b3e42136f3"
         )),
         agg_sig_parent_puzzle_additional_data: Bytes32::new(hex!(
-            "4f59298d607f3143532ed694fb2f10454a684c1a29ef83e250bf5e234c6720b7"
+            "dcdfb533e4d4ccb7f0539ca608e0e04b4054b19993ca2eafe86dd93b3df05b44"
         )),
 
         // DIG L2 cost limits
@@ -204,6 +220,10 @@ pub const DIG_MAINNET: NetworkConstants = NetworkConstants {
 // to `dig-node`'s `relay::DEFAULT_RELAY_URL` (the string a node actually dials
 // when `DIG_RELAY_URL` is unset) and to the `dig-relay` server's documented
 // client endpoint.
+//
+// Port 443: the live `relay.dig.net` NLB exposes its public TLS listener on the
+// standard HTTPS port 443 (the earlier :9450 listener is closed). Using 443 also
+// maximizes reachability from restrictive networks that only allow outbound 443.
 // =============================================================================
 
 /// Canonical DIG NAT-traversal relay endpoint.
@@ -215,11 +235,12 @@ pub const DIG_MAINNET: NetworkConstants = NetworkConstants {
 ///
 /// Format: `wss://<host>:<port>` — the relay protocol (`RelayMessage`,
 /// RLY-001..RLY-007) is JSON over a secure WebSocket. Mainnet uses the canonical
-/// public deployment `relay.dig.net` on port 9450.
+/// public deployment `relay.dig.net` on port 443 (the live NLB public TLS
+/// listener; the earlier :9450 listener is closed).
 ///
 /// Kept byte-identical to `dig-node`'s `relay::DEFAULT_RELAY_URL` and the
 /// `dig-relay` server's documented client endpoint.
-pub const DIG_RELAY_URL: &str = "wss://relay.dig.net:9450";
+pub const DIG_RELAY_URL: &str = "wss://relay.dig.net:443";
 
 // =============================================================================
 // DIG Node localhost endpoint
@@ -245,9 +266,15 @@ pub const DIG_NODE_PORT: u16 = 9778;
 // DIG Testnet
 // ---------------------------------------------------------------------------
 
-/// Placeholder DIG testnet genesis challenge.
+/// Canonical DIG testnet genesis challenge.
+///
+/// Deterministically derived as `sha256(b"DIG_TESTNET:genesis:v1")` — distinct
+/// from mainnet so the two networks never share a `network_id`. Non-zero so the
+/// gossip network_id gate accepts it. Pre-launch canonical value (§3.7),
+/// revisable at true launch; all derived agg_sig data below follows it.
+///   = 088c18d6b7859d885dc2f03166e862c958f74b63b6353c3df71d103b9b806c3b
 const DIG_TESTNET_GENESIS_CHALLENGE: [u8; 32] =
-    hex!("0000000000000000000000000000000000000000000000000000000000000001");
+    hex!("088c18d6b7859d885dc2f03166e862c958f74b63b6353c3df71d103b9b806c3b");
 
 /// DIG testnet constants.
 ///
@@ -259,22 +286,22 @@ pub const DIG_TESTNET: NetworkConstants = NetworkConstants {
         // AGG_SIG_ME = genesis_challenge. Others = sha256(genesis || opcode_byte).
         agg_sig_me_additional_data: Bytes32::new(DIG_TESTNET_GENESIS_CHALLENGE),
         agg_sig_parent_additional_data: Bytes32::new(hex!(
-            "6ae3f62deccdc8d56baf955e45dad1d40332a7b8e4afbb38f07719a863658054"
+            "85b3963bdeb9848af970a9bbd1d36809ae41491ffd67aee7f27e8883936d495c"
         )),
         agg_sig_puzzle_additional_data: Bytes32::new(hex!(
-            "5d962189ce65d3b3799f032add1ab29ef94ebc0e349fe1db231752304cdd6904"
+            "66aba1939e128e1465d58fde414325630e891747c1428d76ebce193cbe966301"
         )),
         agg_sig_amount_additional_data: Bytes32::new(hex!(
-            "3724d66f2da5614aa650517a2feb7d681807d5107441c9c72579e9a751b82d67"
+            "eccab86920a6d982a68898b2dcb7c150383529fcd532fe84c693fb4592c38ae3"
         )),
         agg_sig_puzzle_amount_additional_data: Bytes32::new(hex!(
-            "fb6a54a5b51e9734a6ff72fe4105cd5db891d4dbaef9361586091f0d4486581b"
+            "eb088fad0d4caba66e29130fb07407e60a7545d035d19a188fef0855c874084e"
         )),
         agg_sig_parent_amount_additional_data: Bytes32::new(hex!(
-            "a5556086f1b58dfd5966bf1aac5257c7f60774ffe5a9e219919c56640993f68b"
+            "232aec0a351ba4936b04920e074aebcc621a458f6b1461c4b28c658552f2f35d"
         )),
         agg_sig_parent_puzzle_additional_data: Bytes32::new(hex!(
-            "3fcc94e67cf3975473b065f0b21a4e92dd3df498d8b4464d7da9582669ac4e48"
+            "96263ac395703ab9b3b0f0587e79185f4a9898574a28b4491015ddcf9d321873"
         )),
         // All other fields same as mainnet
         max_block_cost_clvm: 11_000_000_000,
@@ -339,7 +366,7 @@ mod tests {
     /// contract can't silently drift.
     #[test]
     fn dig_relay_url_is_canonical_endpoint() {
-        assert_eq!(DIG_RELAY_URL, "wss://relay.dig.net:9450");
+        assert_eq!(DIG_RELAY_URL, "wss://relay.dig.net:443");
     }
 
     /// The relay endpoint is a secure-WebSocket URL pointing at the canonical
@@ -355,8 +382,8 @@ mod tests {
             "relay must point at the canonical host"
         );
         assert!(
-            DIG_RELAY_URL.ends_with(":9450"),
-            "relay must use the RelayMessage wire port 9450"
+            DIG_RELAY_URL.ends_with(":443"),
+            "relay must use the live NLB public TLS port 443"
         );
     }
 
@@ -368,5 +395,84 @@ mod tests {
     #[test]
     fn dig_node_port_is_canonical() {
         assert_eq!(DIG_NODE_PORT, 9778);
+    }
+
+    // -- Genesis challenge canonical-value guards --------------------------
+    //
+    // These pin the pre-launch canonical genesis challenges byte-for-byte AND
+    // prove they are reproducible from their documented preimages, so the
+    // values can never silently drift (a drift changes every derived signature
+    // domain + the gossip network_id — a cross-repo breaking event).
+
+    use sha2::{Digest, Sha256};
+
+    /// AGG_SIG opcode bytes, per §4.2 of `SPEC.md` (Chia L1 `condition_tools`).
+    const AGG_SIG_OPCODES: [u8; 6] = [43, 44, 45, 46, 47, 48];
+
+    fn sha256(bytes: &[u8]) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        hasher.finalize().into()
+    }
+
+    /// The genesis MUST be non-zero: `dig-gossip` rejects an all-zero
+    /// `network_id`, so a zero genesis would stop the node's gossip pool / DHT /
+    /// PEX from ever starting. This is the connect-enabler invariant.
+    #[test]
+    fn genesis_challenges_are_non_zero() {
+        assert_ne!(DIG_MAINNET.genesis_challenge(), Bytes32::new([0u8; 32]));
+        assert_ne!(DIG_TESTNET.genesis_challenge(), Bytes32::new([0u8; 32]));
+    }
+
+    /// Each genesis challenge equals `sha256` of its documented preimage, so
+    /// anyone can reproduce it and it is provably not random.
+    #[test]
+    fn genesis_challenges_derive_from_documented_preimages() {
+        assert_eq!(
+            DIG_MAINNET_GENESIS_CHALLENGE,
+            sha256(b"DIG_MAINNET:genesis:v1"),
+        );
+        assert_eq!(
+            DIG_TESTNET_GENESIS_CHALLENGE,
+            sha256(b"DIG_TESTNET:genesis:v1"),
+        );
+    }
+
+    /// Mainnet and testnet MUST NOT share a genesis (no cross-network replay).
+    #[test]
+    fn mainnet_and_testnet_genesis_differ() {
+        assert_ne!(
+            DIG_MAINNET.genesis_challenge(),
+            DIG_TESTNET.genesis_challenge(),
+        );
+    }
+
+    /// Every baked-in AGG_SIG additional-data value MUST equal the §4.1 rule
+    /// applied to the network's genesis: AGG_SIG_ME == genesis, and each other
+    /// variant == `sha256(genesis || opcode_byte)`. This regenerates the values
+    /// independently and asserts the constants match — so a genesis change that
+    /// forgets to recompute a derived value is caught.
+    #[test]
+    fn agg_sig_additional_data_matches_derivation_rule() {
+        for net in [&DIG_MAINNET, &DIG_TESTNET] {
+            let genesis = net.genesis_challenge();
+            assert_eq!(net.agg_sig_me_additional_data(), genesis);
+
+            let c = net.consensus();
+            let derived: Vec<Bytes32> = AGG_SIG_OPCODES
+                .iter()
+                .map(|&op| {
+                    let mut preimage = genesis.as_ref().to_vec();
+                    preimage.push(op);
+                    Bytes32::new(sha256(&preimage))
+                })
+                .collect();
+            assert_eq!(c.agg_sig_parent_additional_data, derived[0]);
+            assert_eq!(c.agg_sig_puzzle_additional_data, derived[1]);
+            assert_eq!(c.agg_sig_amount_additional_data, derived[2]);
+            assert_eq!(c.agg_sig_puzzle_amount_additional_data, derived[3]);
+            assert_eq!(c.agg_sig_parent_amount_additional_data, derived[4]);
+            assert_eq!(c.agg_sig_parent_puzzle_additional_data, derived[5]);
+        }
     }
 }

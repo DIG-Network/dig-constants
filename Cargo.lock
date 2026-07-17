@@ -344,11 +344,12 @@ dependencies = [
 
 [[package]]
 name = "dig-constants"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chia-consensus",
  "chia-protocol",
  "hex-literal",
+ "sha2",
 ]
 
 [[package]]

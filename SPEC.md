@@ -58,16 +58,20 @@ time and identical in every build of a given crate version.
 AGG_SIG additional-data values derived from it (§4); every other parameter (§5) is
 identical between the two.
 
-| Network | Genesis challenge (32 bytes, hex) |
-|---|---|
-| `DIG_MAINNET` | `0000000000000000000000000000000000000000000000000000000000000000` |
-| `DIG_TESTNET` | `0000000000000000000000000000000000000000000000000000000000000001` |
+| Network | Genesis challenge (32 bytes, hex) | Source |
+|---|---|---|
+| `DIG_MAINNET` | `0af981862a4df51f51ec59c312315d959931d917c375730b89b9e2b0854d1abf` | Chia mainnet header hash @ height 9,021,277, pinned 2026-07-17 |
+| `DIG_TESTNET` | `088c18d6b7859d885dc2f03166e862c958f74b63b6353c3df71d103b9b806c3b` | `sha256(b"DIG_TESTNET:genesis:v1")` |
 
-3.2. **Pre-launch placeholder.** The mainnet genesis challenge above is a PLACEHOLDER. It
-MUST be replaced with the real DIG mainnet value before mainnet launch, and when it is,
-every `agg_sig_*_additional_data` value MUST be recomputed per the derivation rule in §4.
-Until then, consumers MUST NOT treat signatures or coins bound to this placeholder domain
-as launch-final network state.
+3.2. **Canonical, real-anchored, pre-launch values.** The mainnet genesis anchors the DIG L2
+genesis to a real, verifiable Chia block — the Chia mainnet peak header hash at block height
+9,021,277 (`0af981…1abf`), captured 2026-07-17 via coinset.org `get_blockchain_state`. The
+testnet genesis is the reproducible `sha256` of a fixed documented preimage. Both are non-zero
+(the gossip `network_id` gate rejects an all-zero id) and independently verifiable. These are
+the PRE-LAUNCH canonical values. Per the ecosystem's pre-release status they are revisable at
+true mainnet launch: if re-anchored (mainnet → the launch-time Chia header hash; testnet →
+`:v2`), every `agg_sig_*_additional_data` value MUST be recomputed per §4. Consumers MUST NOT
+treat signatures or coins bound to this pre-launch domain as launch-final network state.
 
 3.3. A transaction signed for one network is invalid on the other: because the AGG_SIG
 additional data differs per network (§4), BLS signatures do not verify across the
@@ -99,29 +103,29 @@ separators (reference: `chia-blockchain` `chia/consensus/condition_tools.py`, li
 genesis challenge. The current values (which do satisfy the rule for the §3 genesis
 challenges) are:
 
-**DIG mainnet** (genesis = 32 zero bytes):
+**DIG mainnet** (genesis = `0af981…1abf`):
 
 | Field | Value (hex) |
 |---|---|
-| `agg_sig_me_additional_data` | `0000000000000000000000000000000000000000000000000000000000000000` |
-| `agg_sig_parent_additional_data` | `978722459e638504a3c4ed25b0eae952f1cba668de5a44ccbb3b311eb6901218` |
-| `agg_sig_puzzle_additional_data` | `b5b75cf3f16babd124b3c36ac239db038cf9384b6f4343ab65121e7994fa87e4` |
-| `agg_sig_amount_additional_data` | `568b7e86b93e78c4a70a90902134266d5f666400d449c827c32422c14a8df42a` |
-| `agg_sig_puzzle_amount_additional_data` | `73f82ca7a07025c76c91a3faf2e574ffa13759597fc5d9a0573b4df70245de2e` |
-| `agg_sig_parent_amount_additional_data` | `3a2914bb834c69f745c1932450bad277f975b3e1b246d003e3a53e550cf74936` |
-| `agg_sig_parent_puzzle_additional_data` | `4f59298d607f3143532ed694fb2f10454a684c1a29ef83e250bf5e234c6720b7` |
+| `agg_sig_me_additional_data` | `0af981862a4df51f51ec59c312315d959931d917c375730b89b9e2b0854d1abf` |
+| `agg_sig_parent_additional_data` | `196d63b6dfbd4440656f9c1eadc686cacfaae771c565762a8cd6e51c892a0077` |
+| `agg_sig_puzzle_additional_data` | `9ca719659b5e2355a91ff330c8612cb58c74f1063eaff99e507602d450b1f71f` |
+| `agg_sig_amount_additional_data` | `d13767da4a8bd9520dbd9e039e68b3eb4b16fdcbb7e7755b5064840eaeb553ce` |
+| `agg_sig_puzzle_amount_additional_data` | `73eea3473bd0daa28793d4bcd218ade462b634b53af97f9a01a91f3059ac75df` |
+| `agg_sig_parent_amount_additional_data` | `eb7302224e77c0f269d0c8b105d4cc786775ae012ed2db49751c33c244c3f647` |
+| `agg_sig_parent_puzzle_additional_data` | `ccac5983685257d50ee7b439bbb502128ddb262813dde4e4a11ac6cdfc66fa8e` |
 
-**DIG testnet** (genesis = 31 zero bytes + `0x01`):
+**DIG testnet** (genesis = `088c18d6…6c3b`):
 
 | Field | Value (hex) |
 |---|---|
-| `agg_sig_me_additional_data` | `0000000000000000000000000000000000000000000000000000000000000001` |
-| `agg_sig_parent_additional_data` | `6ae3f62deccdc8d56baf955e45dad1d40332a7b8e4afbb38f07719a863658054` |
-| `agg_sig_puzzle_additional_data` | `5d962189ce65d3b3799f032add1ab29ef94ebc0e349fe1db231752304cdd6904` |
-| `agg_sig_amount_additional_data` | `3724d66f2da5614aa650517a2feb7d681807d5107441c9c72579e9a751b82d67` |
-| `agg_sig_puzzle_amount_additional_data` | `fb6a54a5b51e9734a6ff72fe4105cd5db891d4dbaef9361586091f0d4486581b` |
-| `agg_sig_parent_amount_additional_data` | `a5556086f1b58dfd5966bf1aac5257c7f60774ffe5a9e219919c56640993f68b` |
-| `agg_sig_parent_puzzle_additional_data` | `3fcc94e67cf3975473b065f0b21a4e92dd3df498d8b4464d7da9582669ac4e48` |
+| `agg_sig_me_additional_data` | `088c18d6b7859d885dc2f03166e862c958f74b63b6353c3df71d103b9b806c3b` |
+| `agg_sig_parent_additional_data` | `85b3963bdeb9848af970a9bbd1d36809ae41491ffd67aee7f27e8883936d495c` |
+| `agg_sig_puzzle_additional_data` | `66aba1939e128e1465d58fde414325630e891747c1428d76ebce193cbe966301` |
+| `agg_sig_amount_additional_data` | `eccab86920a6d982a68898b2dcb7c150383529fcd532fe84c693fb4592c38ae3` |
+| `agg_sig_puzzle_amount_additional_data` | `eb088fad0d4caba66e29130fb07407e60a7545d035d19a188fef0855c874084e` |
+| `agg_sig_parent_amount_additional_data` | `232aec0a351ba4936b04920e074aebcc621a458f6b1461c4b28c658552f2f35d` |
+| `agg_sig_parent_puzzle_additional_data` | `96263ac395703ab9b3b0f0587e79185f4a9898574a28b4491015ddcf9d321873` |
 
 4.4. **Security property.** These values are the BLS signature domain separators for DIG:
 a signer commits to `message || coin-binding || additional_data`, so a signature made for
@@ -158,7 +162,7 @@ Consumers MUST NOT rely on these PoS/VDF fields for any DIG semantics; only the 
 6.1. `DIG_RELAY_URL` is the string constant:
 
 ```
-wss://relay.dig.net:9450
+wss://relay.dig.net:443
 ```
 
 6.2. This is the single source of truth for the DIG NAT-traversal relay endpoint: the
@@ -168,7 +172,8 @@ JSON-over-WebSocket wire (message types RLY-001..RLY-007), implemented by the `d
 server and documented on the docs.dig.net Protocol pages.
 
 6.3. Format contract: the value MUST use the `wss://` scheme (secure WebSocket), the
-canonical public host `relay.dig.net`, and port `9450`. The crate's test suite pins the
+canonical public host `relay.dig.net`, and port `443` (the live NLB public TLS listener; the
+earlier `:9450` listener is closed). The crate's test suite pins the
 constant byte-for-byte and asserts each of these three format properties.
 
 6.4. Override semantics (defined by the consumer, stated here for the contract): a node
@@ -216,7 +221,7 @@ All values are compile-time constants; misuse is impossible at runtime.
   per §4.1–§4.2.
 - I-3: `DIG_MAINNET.genesis_challenge() != DIG_TESTNET.genesis_challenge()`.
 - I-4: mainnet and testnet agree on every non-genesis-derived field (§5).
-- I-5: `DIG_RELAY_URL == "wss://relay.dig.net:9450"` (until a coordinated cross-repo change
+- I-5: `DIG_RELAY_URL == "wss://relay.dig.net:443"` (until a coordinated cross-repo change
   per §6.5).
 - I-6: `DIG_NODE_PORT == 9778` (the default localhost port; until a coordinated cross-repo
   change per §7).
@@ -231,9 +236,10 @@ networks) are minor; removing/renaming an export, changing any published constan
 or bumping the `chia-*` dependency line is major-worthy because downstream signature and
 validation behavior depends on exact values.
 
-9.2. Changing the mainnet genesis challenge at launch (§3.2) is the one planned
-value-changing event; it MUST recompute all §4 values in the same commit and ship as a new
-version that all consumers adopt together.
+9.2. Re-anchoring a genesis challenge at true launch (§3.2 — mainnet to the launch-time Chia
+header hash, testnet to a `:v2` preimage) is the one planned value-changing event; it MUST
+recompute all §4 values in the same commit and ship as a new version that all consumers adopt
+together.
 
 ## 10. Release and CI gates
 
@@ -252,11 +258,11 @@ tags and manual dispatch.
 |---|---|---|
 | C-1 | AGG_SIG_ME additional data equals the genesis challenge | MUST |
 | C-2 | Other AGG_SIG additional data equal `sha256(genesis \|\| opcode_byte)` (opcodes 43–48) | MUST |
-| C-3 | Mainnet genesis placeholder replaced + all §4 values recomputed before launch | MUST |
+| C-3 | Genesis challenges are non-zero, verifiable pinned values (mainnet = Chia header hash @ 9,021,277; testnet = `sha256` of preimage); re-anchoring recomputes all §4 values | MUST |
 | C-4 | Consumers select a network by constant; never mix mainnet/testnet values | MUST |
 | C-5 | Only §3–§5.1 fields carry DIG semantics; PoS/VDF fields are inert filler | MUST NOT rely |
 | C-6 | `DIG_RELAY_URL` byte-identical to `dig-node`'s default and `dig-relay`'s endpoint | MUST |
-| C-7 | Relay endpoint uses `wss://`, host `relay.dig.net`, port `9450` | MUST |
+| C-7 | Relay endpoint uses `wss://`, host `relay.dig.net`, port `443` | MUST |
 | C-8 | `DIG_NODE_PORT == 9778` (client→node localhost connection port) | MUST |
 | C-9 | Constant-value changes ship as coordinated semver-major releases | MUST |
 | C-10 | Crate stays dependency-light (no CLVM engine / networking / async runtime) | MUST |

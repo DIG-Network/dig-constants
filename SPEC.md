@@ -44,6 +44,7 @@ accompanied by a semver-major version bump.
 | `DIG_TESTNET` | `pub const NetworkConstants` | DIG testnet parameters (§3, §5) |
 | `DIG_RELAY_URL` | `pub const &str` | Canonical NAT-traversal relay endpoint (§6) |
 | `DIG_NODE_PORT` | `pub const u16` | Default localhost port for client→node connection (§7) |
+| `DIG_ASSET_ID` | `pub const Bytes32` | Canonical $DIG CAT asset id (TAIL hash) (§8) |
 
 2.1. `NetworkConstants`'s field is private. Consumers MUST reach the underlying
 `ConsensusConstants` only via `consensus()`; the wrapper's accessors are the stable
@@ -209,12 +210,33 @@ byte-for-byte.
 service binds on localhost and to the port the `dig-installer` registers for `dig.local`. A
 change to the port is a coordinated cross-repo protocol change, never a unilateral edit here.
 
-## 8. Invariants and error behavior
+## 8. Canonical $DIG CAT asset id — `DIG_ASSET_ID`
 
-8.1. The crate has no fallible API: no function returns `Result`, panics, or performs I/O.
+8.1. `DIG_ASSET_ID` is the `Bytes32` constant:
+
+```
+a406d3a9de984d03c9591c10d917593b434d5263cabe2b42f6b367df16832f81
+```
+
+8.2. This is the single source of truth for the $DIG CAT's asset id (its CHIP-0004 TAIL
+program hash) on Chia mainnet — the value every capsule (commit) payment is denominated in
+and the value a wallet, decoder, or balance check compares a CAT coin's `asset_id` against
+to recognize $DIG.
+
+8.3. Format contract: the value MUST be the 32-byte hash above. The crate's test suite pins
+this constant byte-for-byte.
+
+8.4. Cross-repo conformance: this constant MUST remain byte-identical to
+`chip35_dl_coin::DIG_ASSET_ID`, digstore-chain's `DIG_ASSET_ID`, and DataLayer-Driver's. A
+change to this value is a coordinated cross-repo protocol change, never a unilateral edit
+here — it would silently break $DIG recognition and payment for every consumer.
+
+## 9. Invariants and error behavior
+
+9.1. The crate has no fallible API: no function returns `Result`, panics, or performs I/O.
 All values are compile-time constants; misuse is impossible at runtime.
 
-8.2. Invariants that MUST hold in every release:
+9.2. Invariants that MUST hold in every release:
 
 - I-1: `agg_sig_me_additional_data == genesis_challenge` for each network.
 - I-2: every other `agg_sig_*_additional_data == sha256(genesis_challenge || opcode_byte)`
@@ -228,31 +250,33 @@ All values are compile-time constants; misuse is impossible at runtime.
 - I-7: the `chia-consensus`/`chia-protocol` dependency versions move in lockstep (currently
   the `0.26` line); a `ConsensusConstants` layout change upstream is a breaking change here
   and requires a semver-major bump.
+- I-8: `DIG_ASSET_ID` equals the pinned $DIG CAT tail hash (§8.1; until a coordinated
+  cross-repo change per §8.4).
 
-## 9. Versioning and compatibility
+## 10. Versioning and compatibility
 
-9.1. The crate follows semver. Additive changes (new constants, new accessors, new
+10.1. The crate follows semver. Additive changes (new constants, new accessors, new
 networks) are minor; removing/renaming an export, changing any published constant value,
 or bumping the `chia-*` dependency line is major-worthy because downstream signature and
 validation behavior depends on exact values.
 
-9.2. Re-anchoring a genesis challenge at true launch (§3.2 — mainnet to the launch-time Chia
+10.2. Re-anchoring a genesis challenge at true launch (§3.2 — mainnet to the launch-time Chia
 header hash, testnet to a `:v2` preimage) is the one planned value-changing event; it MUST
 recompute all §4 values in the same commit and ship as a new version that all consumers adopt
 together.
 
-## 10. Release and CI gates
+## 11. Release and CI gates
 
-10.1. Releases are tag-driven: pushing a `v*` tag (or a manual `workflow_dispatch`) runs the
+11.1. Releases are tag-driven: pushing a `v*` tag (or a manual `workflow_dispatch`) runs the
 `Publish to crates.io` workflow, which gates on `cargo fmt --check`,
 `cargo clippy --all-targets --all-features -D warnings`, `cargo test --all-features`, and
 `cargo doc --no-deps`, then publishes to crates.io (secret `CARGO_REGISTRY_TOKEN`) and
 creates a GitHub Release. A release whose test job fails MUST NOT publish.
 
-10.2. There is no CI workflow on plain pushes to `main`; the gates in §10.1 run on release
+11.2. There is no CI workflow on plain pushes to `main`; the gates in §11.1 run on release
 tags and manual dispatch.
 
-## 11. Conformance summary
+## 12. Conformance summary
 
 | # | Requirement | Level |
 |---|---|---|
@@ -267,3 +291,4 @@ tags and manual dispatch.
 | C-9 | Constant-value changes ship as coordinated semver-major releases | MUST |
 | C-10 | Crate stays dependency-light (no CLVM engine / networking / async runtime) | MUST |
 | C-11 | Release publishes only after fmt/clippy/test/doc gates pass | MUST |
+| C-12 | `DIG_ASSET_ID` byte-identical to `chip35_dl_coin::DIG_ASSET_ID` (the $DIG CAT tail hash) | MUST |

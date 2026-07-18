@@ -266,6 +266,28 @@ pub const DIG_RELAY_URL: &str = "wss://relay.dig.net:443";
 /// `dig.local` address.
 pub const DIG_NODE_PORT: u16 = 9778;
 
+// =============================================================================
+// DIG CAT asset id ($DIG token)
+//
+// $DIG is a Chia CAT (CHIP-0004); its asset id is the TAIL program's hash,
+// fixed for the token's lifetime. This is the single canonical home for that
+// value — `chip35_dl_coin`, `dig-cat-decoder`, and any DIG-aware wallet/
+// balance/spend code import it from HERE rather than each hardcoding a copy.
+// =============================================================================
+
+/// Canonical $DIG CAT asset id (TAIL hash) on Chia mainnet.
+///
+/// The single token every capsule (commit) payment is denominated in
+/// (`chip35_dl_coin::build_dig_store_payment`) and the value a wallet/decoder
+/// checks a CAT coin's `asset_id` against to recognize $DIG.
+///
+/// CONTRACT: byte-identical to `chip35_dl_coin::DIG_ASSET_ID`, digstore-chain's
+/// `DIG_ASSET_ID`, and DataLayer-Driver's. Do not change without changing every
+/// consumer in lockstep (SYSTEM.md → Shared contracts → DIG CAT payment).
+pub const DIG_ASSET_ID: Bytes32 = Bytes32::new(hex!(
+    "a406d3a9de984d03c9591c10d917593b434d5263cabe2b42f6b367df16832f81"
+));
+
 // ---------------------------------------------------------------------------
 // DIG Testnet
 // ---------------------------------------------------------------------------
@@ -450,6 +472,19 @@ mod tests {
         assert_ne!(
             DIG_MAINNET.genesis_challenge(),
             DIG_TESTNET.genesis_challenge(),
+        );
+    }
+
+    /// Pins the $DIG CAT asset id byte-for-byte against the value shipped in
+    /// `chip35_dl_coin::DIG_ASSET_ID` — a drift here silently breaks $DIG
+    /// recognition across every consumer (wallets, decoders, payment builders).
+    #[test]
+    fn dig_asset_id_is_canonical() {
+        assert_eq!(
+            DIG_ASSET_ID,
+            Bytes32::new(hex_literal::hex!(
+                "a406d3a9de984d03c9591c10d917593b434d5263cabe2b42f6b367df16832f81"
+            )),
         );
     }
 

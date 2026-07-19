@@ -8,6 +8,16 @@
 //! `ConsensusConstants` with DIG-specific values (genesis challenge,
 //! AGG_SIG additional data, cost limits, etc.).
 //!
+//! # Chia L1 vs DIG L2 (do not mix)
+//!
+//! [`DIG_MAINNET`] / [`DIG_TESTNET`] describe the DIG **L2** network. Separately,
+//! [`CHIA_L1_MAINNET_AGG_SIG_ME`] / [`CHIA_L1_TESTNET11_AGG_SIG_ME`] hold the
+//! **Chia L1 (foreign chain)** genesis challenge that DIG wallet code needs as
+//! AGG_SIG_ME additional data when signing L1 spends. They live here as the
+//! ecosystem's single source of truth, but are DELIBERATELY distinct from the DIG
+//! L2 genesis — signing an L1 spend with the DIG L2 genesis produces an invalid
+//! signature. The `CHIA_L1_` prefix is the anti-mixup guard.
+//!
 //! # Usage
 //!
 //! ```rust,ignore
@@ -288,6 +298,53 @@ pub const DIG_ASSET_ID: Bytes32 = Bytes32::new(hex!(
     "a406d3a9de984d03c9591c10d917593b434d5263cabe2b42f6b367df16832f81"
 ));
 
+// =============================================================================
+// Chia L1 (foreign chain) AGG_SIG_ME additional data
+//
+// The DIG wallet signs and validates spends on the Chia L1 chain. On Chia L1 the
+// AGG_SIG_ME additional data IS the network genesis challenge, so every L1 spend
+// signature is bound to it. This is a FOREIGN chain's value — completely distinct
+// from the DIG L2 genesis (`DIG_MAINNET_GENESIS_CHALLENGE`, 0af98186…).
+//
+// Both the wallet's signer seam AND the engine's message-binding seam MUST read
+// the SAME 32 bytes from here, or a spend the engine builds is signed with a
+// different domain than it binds — a custody break (invalid, unspendable
+// signatures on mainnet). This crate is the single source of truth for those
+// bytes; the `[u8; 32]` shape matches the signer field directly (the engine wraps
+// it once via `Bytes32::new(...)`).
+//
+// The value is invariant-forced: it is exactly Chia's well-known mainnet genesis
+// (ccd5bb71…) / testnet11 genesis (37a90eb5…), the same values
+// `chia-wallet-sdk`'s `MAINNET_CONSTANTS` / `TESTNET11_CONSTANTS` carry (asserted
+// by an anti-drift dev-dependency test).
+// =============================================================================
+
+/// Chia **L1 mainnet** genesis challenge, used as AGG_SIG_ME additional data.
+///
+/// The 32-byte domain every Chia L1 mainnet spend signature is bound to. This is
+/// the foreign-chain (Chia) value — DISTINCT from the DIG L2 genesis
+/// ([`DIG_MAINNET`]); signing an L1 spend with the DIG L2 genesis yields an
+/// invalid signature.
+///
+/// CONTRACT: DIG wallet consumers (the client signer AND the engine's
+/// message-binding path) MUST both use this constant so signer == engine,
+/// producing byte-identical, valid signatures. Equals Chia's canonical mainnet
+/// genesis `ccd5bb71…` (== `chia_sdk_types::MAINNET_CONSTANTS.agg_sig_me_additional_data`).
+pub const CHIA_L1_MAINNET_AGG_SIG_ME: [u8; 32] =
+    hex!("ccd5bb71183532bff220ba46c268991a3ff07eb358e8255a65c30a2dce0e5fbb");
+
+/// Chia **L1 testnet11** genesis challenge, used as AGG_SIG_ME additional data.
+///
+/// The 32-byte domain every Chia L1 testnet11 spend signature is bound to. As
+/// with [`CHIA_L1_MAINNET_AGG_SIG_ME`], this is the foreign-chain (Chia) value,
+/// DISTINCT from the DIG L2 genesis ([`DIG_TESTNET`]).
+///
+/// CONTRACT: DIG wallet consumers (signer AND engine) MUST both use this constant
+/// so signer == engine on testnet11. Equals Chia's canonical testnet11 genesis
+/// `37a90eb5…` (== `chia_sdk_types::TESTNET11_CONSTANTS.agg_sig_me_additional_data`).
+pub const CHIA_L1_TESTNET11_AGG_SIG_ME: [u8; 32] =
+    hex!("37a90eb5185a9c4439a91ddc98bbadce7b4feba060d50116a067de66bf236615");
+
 // ---------------------------------------------------------------------------
 // DIG Testnet
 // ---------------------------------------------------------------------------
@@ -485,6 +542,56 @@ mod tests {
             Bytes32::new(hex_literal::hex!(
                 "a406d3a9de984d03c9591c10d917593b434d5263cabe2b42f6b367df16832f81"
             )),
+        );
+    }
+
+    // -- Chia L1 AGG_SIG_ME anti-drift guards ------------------------------
+
+    /// Literal pin: the Chia L1 AGG_SIG_ME constants equal Chia's well-known
+    /// mainnet / testnet11 genesis challenges byte-for-byte. This catches any
+    /// accidental mutation independently of any external crate.
+    #[test]
+    fn chia_l1_agg_sig_me_constants_are_the_pinned_values() {
+        assert_eq!(
+            CHIA_L1_MAINNET_AGG_SIG_ME,
+            hex_literal::hex!("ccd5bb71183532bff220ba46c268991a3ff07eb358e8255a65c30a2dce0e5fbb"),
+        );
+        assert_eq!(
+            CHIA_L1_TESTNET11_AGG_SIG_ME,
+            hex_literal::hex!("37a90eb5185a9c4439a91ddc98bbadce7b4feba060d50116a067de66bf236615"),
+        );
+    }
+
+    /// Source KAT: the Chia L1 constants MUST equal the values `chia-wallet-sdk`
+    /// (via `chia-sdk-types`) uses in its `MAINNET_CONSTANTS` / `TESTNET11_CONSTANTS`.
+    /// This is the primary anti-drift guard — the wallet engine binds spends with
+    /// those SDK constants, so if a future SDK version ever changed the value, this
+    /// fails and forces a deliberate re-pin instead of a silent custody break.
+    #[test]
+    fn chia_l1_agg_sig_me_matches_chia_sdk_types() {
+        use chia_sdk_types::{MAINNET_CONSTANTS, TESTNET11_CONSTANTS};
+        assert_eq!(
+            CHIA_L1_MAINNET_AGG_SIG_ME.as_slice(),
+            MAINNET_CONSTANTS.agg_sig_me_additional_data.as_ref(),
+        );
+        assert_eq!(
+            CHIA_L1_TESTNET11_AGG_SIG_ME.as_slice(),
+            TESTNET11_CONSTANTS.agg_sig_me_additional_data.as_ref(),
+        );
+    }
+
+    /// The Chia L1 (foreign chain) AGG_SIG_ME MUST NOT equal the DIG L2 genesis —
+    /// this is the whole reason the constants exist. Signing an L1 spend with the
+    /// DIG L2 genesis would be a custody break.
+    #[test]
+    fn chia_l1_agg_sig_me_differs_from_dig_l2_genesis() {
+        assert_ne!(
+            Bytes32::new(CHIA_L1_MAINNET_AGG_SIG_ME),
+            DIG_MAINNET.genesis_challenge(),
+        );
+        assert_ne!(
+            Bytes32::new(CHIA_L1_TESTNET11_AGG_SIG_ME),
+            DIG_TESTNET.genesis_challenge(),
         );
     }
 

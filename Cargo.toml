@@ -1,6 +1,6 @@
 [package]
 name = "dig-constants"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2021"
 rust-version = "1.75.0"
 description = "DIG network constants — genesis challenge, consensus parameters, and network configuration"
@@ -19,3 +19,7 @@ sha2 = "0.10"
 # chia-wallet-sdk 0.30 binds via its MAINNET/TESTNET11 consensus constants. Dev-only
 # so dig-constants stays a light leaf with no new runtime dependency.
 chia-sdk-types = "0.30"
+# bech32m decode KAT only (see tests): proves DIG_TREASURY_ADDRESS and
+# DIG_TREASURY_INNER_PUZZLE_HASH encode the same recipient. Dev-only so the
+# crate stays a light leaf with no new runtime dependency.
+bech32 = "0.11"

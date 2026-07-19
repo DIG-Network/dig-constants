@@ -299,6 +299,55 @@ pub const DIG_ASSET_ID: Bytes32 = Bytes32::new(hex!(
 ));
 
 // =============================================================================
+// DIG treasury recipient (destination of $DIG payments + dev-tips)
+//
+// Every $DIG capsule/commit payment and dev-tip is created-coin'd to the DIG
+// treasury. This section is the single canonical home for that recipient in two
+// equivalent forms: the on-chain inner (standard) puzzle hash and its bech32m
+// address. A WRONG value here silently MISDIRECTS funds to an attacker/void —
+// a custody break — so both forms are pinned byte-for-byte by tests, and a KAT
+// proves the address decodes to the puzzle hash (they cannot drift apart).
+//
+// CONTRACT: dig-constants is the intended canonical LOWEST-level home for this
+// value. The existing higher-level copies (`digstore_chain::dig`,
+// `chip35_dl_coin`, `dighub-core`) SHOULD later converge to re-export from HERE.
+// That convergence is a SEPARATE follow-up — this change only introduces the
+// canonical constants; it does not touch those crates. Until convergence, this
+// value stays byte-identical to `digstore_chain::dig` (the current source of
+// truth: `TREASURY_ADDRESS` at `crates/digstore-chain/src/dig.rs:41`, from which
+// it derives `treasury_inner_puzzle_hash()`, pinned by its test at dig.rs:206-209).
+// =============================================================================
+
+/// Canonical DIG treasury inner (standard) puzzle hash.
+///
+/// The on-chain recipient every $DIG capsule/commit payment and dev-tip is
+/// created-coin'd to. A wrong value silently misdirects treasury funds (a
+/// custody break), so it is pinned byte-for-byte by a test.
+///
+/// CONTRACT: byte-identical to what `digstore_chain::dig::treasury_inner_puzzle_hash()`
+/// decodes to (pinned by that crate's test at `crates/digstore-chain/src/dig.rs:206-209`).
+/// dig-constants is the intended canonical lowest-level home; higher copies
+/// (`digstore_chain::dig`, `chip35_dl_coin`, `dighub-core`) should later
+/// re-export from here (a separate follow-up — see the section note above).
+pub const DIG_TREASURY_INNER_PUZZLE_HASH: Bytes32 = Bytes32::new(hex!(
+    "ec7c304708c7d59c078d5ae098d0dea004decf47fa1cafebb266c10ad6466ce8"
+));
+
+/// Canonical DIG treasury address (bech32m form of [`DIG_TREASURY_INNER_PUZZLE_HASH`]).
+///
+/// The human-readable `xch1…` form of the same treasury recipient — the
+/// destination of $DIG payments and dev-tips. A wrong value misdirects funds
+/// (a custody break), so it is pinned by a test AND a KAT proves it decodes to
+/// [`DIG_TREASURY_INNER_PUZZLE_HASH`] (the two forms cannot silently drift).
+///
+/// CONTRACT: digstore-chain's source-of-truth form (`digstore_chain::dig::TREASURY_ADDRESS`,
+/// `crates/digstore-chain/src/dig.rs:41`), from which it derives the puzzle hash
+/// at runtime. dig-constants is the intended canonical lowest-level home; higher
+/// copies should later re-export from here (a separate follow-up).
+pub const DIG_TREASURY_ADDRESS: &str =
+    "xch1a37rq3cgcl2ecpudttsf35x75qzdan68lgw2l6ajvmqs44jxdn5qv6pk3y";
+
+// =============================================================================
 // Chia L1 (foreign chain) AGG_SIG_ME additional data
 //
 // The DIG wallet signs and validates spends on the Chia L1 chain. On Chia L1 the
@@ -592,6 +641,51 @@ mod tests {
         assert_ne!(
             Bytes32::new(CHIA_L1_TESTNET11_AGG_SIG_ME),
             DIG_TESTNET.genesis_challenge(),
+        );
+    }
+
+    // -- DIG treasury recipient anti-drift guards --------------------------
+
+    /// Literal pin: the treasury inner puzzle hash equals the value
+    /// `digstore_chain::dig::treasury_inner_puzzle_hash()` decodes to
+    /// (byte-identical, pinned by that crate's own test at
+    /// `crates/digstore-chain/src/dig.rs:206-209`). A drift here silently
+    /// MISDIRECTS every $DIG capsule/commit payment and dev-tip to the wrong
+    /// on-chain recipient — a custody break.
+    #[test]
+    fn dig_treasury_inner_puzzle_hash_is_canonical() {
+        assert_eq!(
+            DIG_TREASURY_INNER_PUZZLE_HASH,
+            Bytes32::new(hex_literal::hex!(
+                "ec7c304708c7d59c078d5ae098d0dea004decf47fa1cafebb266c10ad6466ce8"
+            )),
+        );
+    }
+
+    /// Literal pin: the treasury address equals digstore-chain's
+    /// source-of-truth bech32m form (`digstore_chain::dig::TREASURY_ADDRESS`,
+    /// `crates/digstore-chain/src/dig.rs:41`). A drift misdirects funds.
+    #[test]
+    fn dig_treasury_address_is_canonical() {
+        assert_eq!(
+            DIG_TREASURY_ADDRESS,
+            "xch1a37rq3cgcl2ecpudttsf35x75qzdan68lgw2l6ajvmqs44jxdn5qv6pk3y",
+        );
+    }
+
+    /// KAT: the bech32m address and the inner puzzle hash cannot silently drift
+    /// apart. Decodes `DIG_TREASURY_ADDRESS` (HRP `xch`, bech32m) and asserts
+    /// the 32 decoded bytes equal `DIG_TREASURY_INNER_PUZZLE_HASH`, proving the
+    /// two constants encode the SAME on-chain recipient.
+    #[test]
+    fn dig_treasury_address_decodes_to_inner_puzzle_hash() {
+        use bech32::Hrp;
+        let (hrp, data) = bech32::decode(DIG_TREASURY_ADDRESS).expect("valid bech32m");
+        assert_eq!(hrp, Hrp::parse("xch").unwrap(), "HRP must be xch");
+        assert_eq!(
+            data.as_slice(),
+            DIG_TREASURY_INNER_PUZZLE_HASH.to_bytes(),
+            "address must decode to the pinned inner puzzle hash",
         );
     }
 

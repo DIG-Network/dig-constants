@@ -1,6 +1,6 @@
 [package]
 name = "dig-constants"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 rust-version = "1.75.0"
 description = "DIG network constants — genesis challenge, consensus parameters, and network configuration"
@@ -15,3 +15,7 @@ hex-literal = "0.4"
 
 [dev-dependencies]
 sha2 = "0.10"
+# Anti-drift KAT only (see tests): pins CHIA_L1_*_AGG_SIG_ME to the same values
+# chia-wallet-sdk 0.30 binds via its MAINNET/TESTNET11 consensus constants. Dev-only
+# so dig-constants stays a light leaf with no new runtime dependency.
+chia-sdk-types = "0.30"

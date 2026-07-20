@@ -1,6 +1,6 @@
 [package]
 name = "dig-constants"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 rust-version = "1.75.0"
 description = "DIG network constants — genesis challenge, consensus parameters, and network configuration"

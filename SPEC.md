@@ -231,6 +231,42 @@ this constant byte-for-byte.
 change to this value is a coordinated cross-repo protocol change, never a unilateral edit
 here — it would silently break $DIG recognition and payment for every consumer.
 
+## 8a. Profile DEK at-rest byte contract — `DEK_SALT`, `IDENTITY_IKM_VERSION`, `PROFILE_DEK_LABEL`, `SYMMETRIC_KEY_LEN`
+
+8a.1. These four constants are the single source of truth for deriving a DIG user profile's
+data-encryption-key (DEK):
+
+```
+DEK_SALT              = b"dig-app:dek-salt:v1"          (&[u8])
+IDENTITY_IKM_VERSION   = 2                              (u8)
+PROFILE_DEK_LABEL      = b"dig-app:profile-dek:v2"       (&[u8])
+SYMMETRIC_KEY_LEN      = 32                              (usize)
+```
+
+8a.2. Derivation rule:
+
+```
+HKDF-SHA256(salt = DEK_SALT,
+            ikm  = IDENTITY_IKM_VERSION || identity_scalar_32,
+            info = PROFILE_DEK_LABEL)
+  -> SYMMETRIC_KEY_LEN bytes
+```
+
+8a.3. This is a PERMANENT at-rest byte-identical contract (§4.1/§5.1/NC-5): the DEK is derived,
+never stored, from the user's identity scalar. Every sealed profile on disk was encrypted with a
+DEK derived from exactly these bytes. Changing any one of the four constants re-derives a
+different key and makes every already-sealed profile permanently unreadable — there is no
+migration path for a derived key. A future revision to this contract MUST introduce a new
+version-scoped label/version alongside the existing ones, never mutate them in place.
+
+8a.4. Format contract: the crate's test suite pins each of the four constants byte-for-byte /
+literally.
+
+8a.5. Cross-repo conformance: these constants MUST remain byte-identical to the local literals
+in `dig-app` (`crates/dig-app-core/src/keystore/secrets.rs`) and `dig-session`
+(`src/unlocked.rs`, `derive_symmetric_key`). Both crates consume these constants from here rather
+than duplicating the literals.
+
 ## 9. Invariants and error behavior
 
 9.1. The crate has no fallible API: no function returns `Result`, panics, or performs I/O.

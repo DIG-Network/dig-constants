@@ -486,6 +486,60 @@ pub const DIG_TESTNET: NetworkConstants = NetworkConstants {
     },
 };
 
+// =============================================================================
+// Profile DEK at-rest byte contract
+//
+// A DIG user profile's data-encryption-key (DEK) is derived, never stored, from
+// the user's identity scalar via HKDF-SHA256:
+//
+//   HKDF-SHA256(salt = DEK_SALT,
+//               ikm  = IDENTITY_IKM_VERSION || identity_scalar_32,
+//               info = PROFILE_DEK_LABEL)
+//     -> SYMMETRIC_KEY_LEN bytes
+//
+// These four values are a PERMANENT at-rest byte-identical contract (§4.1/§5.1/
+// NC-5): every sealed profile on disk was encrypted with a DEK derived from
+// EXACTLY these bytes. Changing any one of them re-derives a different key and
+// makes every already-sealed profile permanently unreadable — there is no
+// migration path for a derived (never-stored) key. Treat this section as
+// frozen; only ever ADD a new version-scoped label/version alongside it.
+//
+// Consumers (this crate is their single source of truth — do not duplicate the
+// literals locally):
+//   - dig-app:    crates/dig-app-core/src/keystore/secrets.rs
+//   - dig-session: src/unlocked.rs (derive_symmetric_key)
+// =============================================================================
+
+/// HKDF salt for the per-profile DEK derivation.
+///
+/// Part of the frozen [profile DEK byte contract](self#profile-dek-at-rest-byte-contract)
+/// — see the section comment above. Consumed by dig-app's
+/// `keystore/secrets.rs` and dig-session's `derive_symmetric_key`.
+pub const DEK_SALT: &[u8] = b"dig-app:dek-salt:v1";
+
+/// Version byte prefixed to the 32-byte identity scalar to form the DEK's HKDF
+/// input key material (`IDENTITY_IKM_VERSION || identity_scalar_32`).
+///
+/// Part of the frozen [profile DEK byte contract](self#profile-dek-at-rest-byte-contract).
+/// Consumed by dig-app's `keystore/secrets.rs` and dig-session's
+/// `derive_symmetric_key`.
+pub const IDENTITY_IKM_VERSION: u8 = 2;
+
+/// HKDF info/label for the per-profile DEK derivation.
+///
+/// Part of the frozen [profile DEK byte contract](self#profile-dek-at-rest-byte-contract).
+/// Consumed by dig-app's `keystore/secrets.rs` and dig-session's
+/// `derive_symmetric_key`.
+pub const PROFILE_DEK_LABEL: &[u8] = b"dig-app:profile-dek:v2";
+
+/// Output length, in bytes, of the derived per-profile DEK (HKDF-SHA256's
+/// natural output for a symmetric AEAD key).
+///
+/// Part of the frozen [profile DEK byte contract](self#profile-dek-at-rest-byte-contract).
+/// Consumed by dig-app's `keystore/secrets.rs` and dig-session's
+/// `derive_symmetric_key`.
+pub const SYMMETRIC_KEY_LEN: usize = 32;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -687,6 +741,32 @@ mod tests {
             DIG_TREASURY_INNER_PUZZLE_HASH.to_bytes(),
             "address must decode to the pinned inner puzzle hash",
         );
+    }
+
+    // -- Profile DEK at-rest byte-contract guards ---------------------------
+    //
+    // These pin every DEK-derivation constant literally so a future edit can't
+    // silently drift the contract (which would make every already-sealed
+    // profile permanently unreadable, §5.1).
+
+    #[test]
+    fn dek_salt_is_the_pinned_value() {
+        assert_eq!(DEK_SALT, b"dig-app:dek-salt:v1");
+    }
+
+    #[test]
+    fn identity_ikm_version_is_the_pinned_value() {
+        assert_eq!(IDENTITY_IKM_VERSION, 2);
+    }
+
+    #[test]
+    fn profile_dek_label_is_the_pinned_value() {
+        assert_eq!(PROFILE_DEK_LABEL, b"dig-app:profile-dek:v2");
+    }
+
+    #[test]
+    fn symmetric_key_len_is_the_pinned_value() {
+        assert_eq!(SYMMETRIC_KEY_LEN, 32);
     }
 
     /// Every baked-in AGG_SIG additional-data value MUST equal the §4.1 rule

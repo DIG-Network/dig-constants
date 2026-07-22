@@ -256,6 +256,9 @@ pub const DIG_MAINNET: NetworkConstants = NetworkConstants {
 /// `dig-relay` server's documented client endpoint.
 pub const DIG_RELAY_URL: &str = "wss://relay.dig.net:443";
 
+// TODO(#1283): hoist DIG_LOCAL_HOST + RPC_DIG_NET_URL from the §5.3 read
+// ladder into public consts here, adjacent to DIG_NODE_PORT.
+
 // =============================================================================
 // DIG Node localhost endpoint
 //

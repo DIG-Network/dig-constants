@@ -4,6 +4,11 @@ All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org) and
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## [0.8.0] - 2026-07-22
+
+### Features
+- **constants:** Hoist §5.3 read-ladder endpoints (dig.local, rpc.dig.net) (#9)
+
 ## [0.7.0] - 2026-07-20
 
 ### Features

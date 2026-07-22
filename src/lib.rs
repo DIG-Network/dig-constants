@@ -276,6 +276,26 @@ pub const DIG_RELAY_URL: &str = "wss://relay.dig.net:443";
 /// `dig.local` address.
 pub const DIG_NODE_PORT: u16 = 9778;
 
+/// The mDNS/local hostname the installed DIG node registers.
+///
+/// This is the FIRST tier of the §5.3 client→node connection order: a client
+/// tries `dig.local` (on [`DIG_NODE_PORT`]) before falling back to `localhost`
+/// and finally the public [`RPC_DIG_NET_URL`] gateway. This constant ensures
+/// all consumers (dig-node, dig-dns, dig-installer, dig-sdk, digstore CLI) use
+/// an identical hostname, preventing drift between the address the installer
+/// registers and the address clients probe.
+pub const DIG_LOCAL_HOST: &str = "dig.local";
+
+/// The public DIG read gateway.
+///
+/// This is the FINAL-FALLBACK tier of the §5.3 client→node connection order:
+/// a client falls through to this plain-HTTPS public read tier only when
+/// neither `dig.local` nor `localhost` (both on [`DIG_NODE_PORT`]) responds.
+/// This constant ensures all consumers (dig-download, digstore CLI, dig-sdk,
+/// dig-node) reference an identical gateway URL instead of each hardcoding
+/// their own copy of `rpc.dig.net`.
+pub const RPC_DIG_NET_URL: &str = "https://rpc.dig.net";
+
 // =============================================================================
 // DIG CAT asset id ($DIG token)
 //
@@ -581,6 +601,36 @@ mod tests {
     #[test]
     fn dig_node_port_is_canonical() {
         assert_eq!(DIG_NODE_PORT, 9778);
+    }
+
+    /// The local-node hostname must equal the expected default.
+    ///
+    /// This guards the first tier of the §5.3 client→node connection order —
+    /// a drift here would desync the installer's registered address from what
+    /// clients probe.
+    #[test]
+    fn dig_local_host_is_canonical() {
+        assert_eq!(DIG_LOCAL_HOST, "dig.local");
+    }
+
+    /// The public read gateway must equal the expected default.
+    ///
+    /// This guards the final-fallback tier of the §5.3 client→node connection
+    /// order — the gateway every consumer falls through to when no local node
+    /// responds.
+    #[test]
+    fn rpc_dig_net_url_is_canonical() {
+        assert_eq!(RPC_DIG_NET_URL, "https://rpc.dig.net");
+    }
+
+    /// The public read gateway is a plain-HTTPS URL (the public read tier,
+    /// distinct from the mTLS transport node-class clients use, §5.3).
+    #[test]
+    fn rpc_dig_net_url_is_well_formed() {
+        assert!(
+            RPC_DIG_NET_URL.starts_with("https://"),
+            "the public read gateway must use HTTPS"
+        );
     }
 
     // -- Genesis challenge canonical-value guards --------------------------

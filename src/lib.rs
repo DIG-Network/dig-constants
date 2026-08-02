@@ -560,6 +560,50 @@ pub const PROFILE_DEK_LABEL: &[u8] = b"dig-app:profile-dek:v2";
 /// `derive_symmetric_key`.
 pub const SYMMETRIC_KEY_LEN: usize = 32;
 
+// =============================================================================
+// Profile sealing X25519 byte contract
+//
+// A DIG user profile's per-profile X25519 *sealing* keypair (used by the DIG
+// App to seal/unseal `DIGCHAT1` messages for dig-chat, §NC-1 end-to-end
+// encryption) is derived, never stored, from the same identity scalar as the
+// DEK — but under a DISTINCT HKDF `info` label, which is the sole thing that
+// domain-separates the sealing key from the at-rest DEK:
+//
+//   HKDF-SHA256(salt = DEK_SALT,
+//               ikm  = IDENTITY_IKM_VERSION || identity_scalar_32,
+//               info = PROFILE_SEALING_X25519_LABEL)
+//     -> SYMMETRIC_KEY_LEN (32) bytes, then CLAMPED to an X25519 scalar
+//
+// This label reuses the already-frozen DEK_SALT + IDENTITY_IKM_VERSION on
+// purpose; only the `info` label differs. The 32-byte HKDF output is clamped
+// to a valid X25519 secret scalar by the CONSUMER (dig-account) — this crate
+// owns ONLY the frozen label bytes, not the clamp/derivation.
+//
+// The label is a PERMANENT byte-identical contract (§4.1/§5.1/NC-1): every
+// message already sealed on the network was encrypted under a keypair derived
+// from EXACTLY these bytes. Changing it re-derives a different keypair and
+// makes every already-sealed message permanently unopenable — there is no
+// migration path for a derived (never-stored) key. Treat it as frozen; only
+// ever ADD a new version-scoped label (`…:v2`) alongside it, never mutate it.
+//
+// Consumers (this crate is their single source of truth — do not duplicate the
+// literal locally):
+//   - dig-account: derives the sealing keypair via
+//     `seed.profile_derive_symmetric_key(ix, PROFILE_SEALING_X25519_LABEL)`
+//     then clamps the output to an X25519 scalar.
+// =============================================================================
+
+/// HKDF info/label for deriving a profile's per-profile X25519 **sealing**
+/// keypair — the key the DIG App uses to seal/unseal `DIGCHAT1` messages.
+///
+/// Part of the frozen [profile sealing X25519 byte
+/// contract](self#profile-sealing-x25519-byte-contract) — see the section
+/// comment above. Reuses [`DEK_SALT`] + [`IDENTITY_IKM_VERSION`]; this distinct
+/// `info` label is what domain-separates the sealing key from [`PROFILE_DEK_LABEL`].
+/// The 32-byte HKDF output is clamped to an X25519 scalar by the consumer
+/// (dig-account), not here.
+pub const PROFILE_SEALING_X25519_LABEL: &[u8] = b"dig-app:profile-sealing-x25519:v1";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -817,6 +861,29 @@ mod tests {
     #[test]
     fn symmetric_key_len_is_the_pinned_value() {
         assert_eq!(SYMMETRIC_KEY_LEN, 32);
+    }
+
+    /// The per-profile X25519 sealing label is a PERMANENT crypto byte contract
+    /// (§5.1): every `DIGCHAT1` message a DIG user has ever sealed was encrypted
+    /// under a sealing key derived from EXACTLY these bytes. A drift here would
+    /// re-derive a different keypair and make every already-sealed message
+    /// permanently unopenable. This pins the label literally so no future edit
+    /// can silently change it.
+    #[test]
+    fn profile_sealing_x25519_label_is_the_pinned_value() {
+        assert_eq!(
+            PROFILE_SEALING_X25519_LABEL,
+            b"dig-app:profile-sealing-x25519:v1"
+        );
+    }
+
+    /// The sealing label MUST be distinct from the DEK label — a shared `info`
+    /// would derive the same 32 bytes for both the at-rest DEK and the X25519
+    /// sealing key, collapsing the domain separation the two labels exist to
+    /// provide. This guards that domain separation directly.
+    #[test]
+    fn profile_sealing_label_is_domain_separated_from_dek_label() {
+        assert_ne!(PROFILE_SEALING_X25519_LABEL, PROFILE_DEK_LABEL);
     }
 
     /// Every baked-in AGG_SIG additional-data value MUST equal the §4.1 rule

@@ -165,7 +165,6 @@ pub const DIG_MAINNET: NetworkConstants = NetworkConstants {
         max_coin_amount: u64::MAX,
 
         // Block generator limits
-        max_generator_size: 1_000_000,
         max_generator_ref_list_size: 512,
 
         // Hard fork heights — set to 0 to always use latest consensus rules.
@@ -196,8 +195,7 @@ pub const DIG_MAINNET: NetworkConstants = NetworkConstants {
         number_zero_bits_plot_filter_v2: 9,
         min_plot_size_v1: 32,
         max_plot_size_v1: 50,
-        min_plot_size_v2: 28,
-        max_plot_size_v2: 32,
+        plot_size_v2: 28,
         sub_slot_time_target: 600,
         num_sp_intervals_extra: 3,
         max_future_time2: 120,
@@ -212,12 +210,12 @@ pub const DIG_MAINNET: NetworkConstants = NetworkConstants {
         plot_filter_128_height: 0xffff_ffff,
         plot_filter_64_height: 0xffff_ffff,
         plot_filter_32_height: 0xffff_ffff,
-        plot_difficulty_initial: 2,
-        plot_difficulty_4_height: 0xffff_ffff,
-        plot_difficulty_5_height: 0xffff_ffff,
-        plot_difficulty_6_height: 0xffff_ffff,
-        plot_difficulty_7_height: 0xffff_ffff,
-        plot_difficulty_8_height: 0xffff_ffff,
+        plot_v1_phase_out_epoch_bits: 8,
+        min_plot_strength: 2,
+        max_plot_strength: 32,
+        plot_filter_v2_first_adjustment_height: 0xffff_ffff,
+        plot_filter_v2_second_adjustment_height: 0xffff_ffff,
+        plot_filter_v2_third_adjustment_height: 0xffff_ffff,
     },
 };
 
@@ -459,7 +457,6 @@ pub const DIG_TESTNET: NetworkConstants = NetworkConstants {
         max_block_cost_clvm: 11_000_000_000,
         cost_per_byte: 12_000,
         max_coin_amount: u64::MAX,
-        max_generator_size: 1_000_000,
         max_generator_ref_list_size: 512,
         hard_fork_height: 0,
         hard_fork2_height: 0,
@@ -481,8 +478,7 @@ pub const DIG_TESTNET: NetworkConstants = NetworkConstants {
         number_zero_bits_plot_filter_v2: 9,
         min_plot_size_v1: 32,
         max_plot_size_v1: 50,
-        min_plot_size_v2: 28,
-        max_plot_size_v2: 32,
+        plot_size_v2: 28,
         sub_slot_time_target: 600,
         num_sp_intervals_extra: 3,
         max_future_time2: 120,
@@ -497,12 +493,12 @@ pub const DIG_TESTNET: NetworkConstants = NetworkConstants {
         plot_filter_128_height: 0xffff_ffff,
         plot_filter_64_height: 0xffff_ffff,
         plot_filter_32_height: 0xffff_ffff,
-        plot_difficulty_initial: 2,
-        plot_difficulty_4_height: 0xffff_ffff,
-        plot_difficulty_5_height: 0xffff_ffff,
-        plot_difficulty_6_height: 0xffff_ffff,
-        plot_difficulty_7_height: 0xffff_ffff,
-        plot_difficulty_8_height: 0xffff_ffff,
+        plot_v1_phase_out_epoch_bits: 8,
+        min_plot_strength: 2,
+        max_plot_strength: 32,
+        plot_filter_v2_first_adjustment_height: 0xffff_ffff,
+        plot_filter_v2_second_adjustment_height: 0xffff_ffff,
+        plot_filter_v2_third_adjustment_height: 0xffff_ffff,
     },
 };
 

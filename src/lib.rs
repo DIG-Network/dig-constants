@@ -738,6 +738,129 @@ mod tests {
         );
     }
 
+    // -- Independent genesis + AGG_SIG domain pins (#2316) -----------------
+    //
+    // These guard against the ORIGINAL defect class: dig-constants 0.1.0 shipped
+    // an all-zeros PLACEHOLDER genesis and its six AGG_SIG additional-data
+    // domains were CORRECTLY derived from that placeholder. Any test that
+    // re-derives the domains from the crate's OWN genesis (like
+    // `agg_sig_additional_data_matches_derivation_rule` below) passes on
+    // placeholder data exactly as on real data — the values are
+    // "self-consistent-wrong". The finalized value (`0af981…1abf`, 0.4.0) had no
+    // independent pin, so it could silently regress to a placeholder again.
+    //
+    // The guards here break that self-consistency by pinning against a SECOND,
+    // INDEPENDENT hardcoded copy of the genesis literal: the AGG_SIG domains are
+    // derived FROM THAT LITERAL, not from `net.genesis_challenge()`. A placeholder
+    // genesis with placeholder-derived domains (internally consistent) therefore
+    // FAILS these tests even though it passes the derivation-rule test. Do NOT
+    // change these expectations to read from the const under test — that would
+    // reintroduce the self-consistency the pin exists to prevent.
+
+    /// Independent second copy of the finalized DIG mainnet genesis (`0af981…1abf`),
+    /// deliberately NOT read from [`DIG_MAINNET_GENESIS_CHALLENGE`] — this is the
+    /// external witness the const is checked against.
+    const EXPECTED_MAINNET_GENESIS: [u8; 32] =
+        hex_literal::hex!("0af981862a4df51f51ec59c312315d959931d917c375730b89b9e2b0854d1abf");
+
+    /// Independent second copy of the DIG testnet genesis (`088c18d6…6c3b`).
+    const EXPECTED_TESTNET_GENESIS: [u8; 32] =
+        hex_literal::hex!("088c18d6b7859d885dc2f03166e862c958f74b63b6353c3df71d103b9b806c3b");
+
+    /// The mainnet genesis MUST equal the finalized literal, checked at BOTH the
+    /// raw const and the public accessor against an independent hardcoded copy.
+    /// If someone edits the const back to a placeholder, this fails.
+    #[test]
+    fn mainnet_genesis_equals_independent_literal() {
+        assert_eq!(DIG_MAINNET_GENESIS_CHALLENGE, EXPECTED_MAINNET_GENESIS);
+        assert_eq!(
+            DIG_MAINNET.genesis_challenge(),
+            Bytes32::new(EXPECTED_MAINNET_GENESIS),
+        );
+    }
+
+    /// The testnet genesis MUST equal its finalized literal, at both the const
+    /// and the accessor.
+    #[test]
+    fn testnet_genesis_equals_independent_literal() {
+        assert_eq!(DIG_TESTNET_GENESIS_CHALLENGE, EXPECTED_TESTNET_GENESIS);
+        assert_eq!(
+            DIG_TESTNET.genesis_challenge(),
+            Bytes32::new(EXPECTED_TESTNET_GENESIS),
+        );
+    }
+
+    /// Belt-and-suspenders: the genesis must not be all-zeros, all-0xFF, or a
+    /// trivial counting pattern — the shapes a stub/placeholder tends to take.
+    #[test]
+    fn mainnet_genesis_is_not_an_obvious_placeholder() {
+        let g = DIG_MAINNET_GENESIS_CHALLENGE;
+        assert_ne!(g, [0u8; 32], "genesis must not be all-zeros (0.1.0 stub)");
+        assert_ne!(g, [0xFFu8; 32], "genesis must not be all-0xFF");
+        let counting: [u8; 32] = core::array::from_fn(|i| i as u8);
+        assert_ne!(g, counting, "genesis must not be a counting pattern");
+        // Not a single repeated byte (e.g. 0x01010101…).
+        assert!(
+            g.iter().any(|&b| b != g[0]),
+            "genesis must not be a single repeated byte",
+        );
+    }
+
+    /// Independent AGG_SIG-domain pin (the core of the fix). Each of the six DIG
+    /// mainnet AGG_SIG additional-data domains MUST equal `sha256(genesis_literal
+    /// || opcode_byte)` computed from the INDEPENDENT [`EXPECTED_MAINNET_GENESIS`]
+    /// literal (AGG_SIG_ME == the genesis literal directly). Because the expected
+    /// values come from a hardcoded copy of the REAL genesis rather than from the
+    /// crate's own const, a placeholder genesis whose domains were re-derived from
+    /// the placeholder (self-consistent-wrong) FAILS here.
+    #[test]
+    fn mainnet_agg_sig_domains_equal_independent_literal_derivation() {
+        let c = DIG_MAINNET.consensus();
+        assert_eq!(
+            c.agg_sig_me_additional_data,
+            Bytes32::new(EXPECTED_MAINNET_GENESIS),
+            "AGG_SIG_ME must equal the genesis literal directly",
+        );
+        let expected: Vec<Bytes32> = AGG_SIG_OPCODES
+            .iter()
+            .map(|&op| {
+                let mut preimage = EXPECTED_MAINNET_GENESIS.to_vec();
+                preimage.push(op);
+                Bytes32::new(sha256(&preimage))
+            })
+            .collect();
+        assert_eq!(c.agg_sig_parent_additional_data, expected[0]);
+        assert_eq!(c.agg_sig_puzzle_additional_data, expected[1]);
+        assert_eq!(c.agg_sig_amount_additional_data, expected[2]);
+        assert_eq!(c.agg_sig_puzzle_amount_additional_data, expected[3]);
+        assert_eq!(c.agg_sig_parent_amount_additional_data, expected[4]);
+        assert_eq!(c.agg_sig_parent_puzzle_additional_data, expected[5]);
+    }
+
+    /// The same independent AGG_SIG-domain pin for DIG testnet.
+    #[test]
+    fn testnet_agg_sig_domains_equal_independent_literal_derivation() {
+        let c = DIG_TESTNET.consensus();
+        assert_eq!(
+            c.agg_sig_me_additional_data,
+            Bytes32::new(EXPECTED_TESTNET_GENESIS),
+        );
+        let expected: Vec<Bytes32> = AGG_SIG_OPCODES
+            .iter()
+            .map(|&op| {
+                let mut preimage = EXPECTED_TESTNET_GENESIS.to_vec();
+                preimage.push(op);
+                Bytes32::new(sha256(&preimage))
+            })
+            .collect();
+        assert_eq!(c.agg_sig_parent_additional_data, expected[0]);
+        assert_eq!(c.agg_sig_puzzle_additional_data, expected[1]);
+        assert_eq!(c.agg_sig_amount_additional_data, expected[2]);
+        assert_eq!(c.agg_sig_puzzle_amount_additional_data, expected[3]);
+        assert_eq!(c.agg_sig_parent_amount_additional_data, expected[4]);
+        assert_eq!(c.agg_sig_parent_puzzle_additional_data, expected[5]);
+    }
+
     // -- Chia L1 AGG_SIG_ME anti-drift guards ------------------------------
 
     /// Literal pin: the Chia L1 AGG_SIG_ME constants equal Chia's well-known

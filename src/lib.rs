@@ -295,6 +295,33 @@ pub const DIG_LOCAL_HOST: &str = "dig.local";
 pub const RPC_DIG_NET_URL: &str = "https://rpc.dig.net";
 
 // =============================================================================
+// DIG bootstrap peers
+//
+// A node with no relay reservation and no remembered peers has nothing to dial
+// and forms zero connections. The bootstrap set is the always-on anchor that
+// gives such a node its first dialable peer, exactly as Chia's introducers seed
+// a fresh full node.
+// =============================================================================
+
+/// The always-on peers a DIG node dials at startup to obtain its FIRST peers.
+///
+/// A freshly-installed node knows no peers: peer exchange and the DHT can only
+/// spread peers a node already has, and a relay reservation only makes the node
+/// reachable, never populates its address book. Without a bootstrap set such a
+/// node reports `connected_peers = 0` forever. Each entry is a `host:port`
+/// authority dialed on the node↔node mTLS peer interface (the same interface
+/// every peer exposes, [`DIG_NODE_PORT`]), and is an ADDRESS-ONLY dial
+/// candidate: the peer's identity is learned from the certificate the mTLS
+/// handshake verifies, never asserted here, so a stale or hostile entry can
+/// authenticate as nothing but itself.
+///
+/// Operators override the set with the `DIG_BOOTSTRAP_PEERS` environment
+/// variable (a comma-separated `host:port` list) or disable it with
+/// `DIG_BOOTSTRAP_PEERS=off` for an air-gapped node — the same shape
+/// [`DIG_RELAY_URL`] uses.
+pub const DIG_BOOTSTRAP_PEERS: &[&str] = &["rpc.dig.net:9778"];
+
+// =============================================================================
 // DIG CAT asset id ($DIG token)
 //
 // $DIG is a Chia CAT (CHIP-0004); its asset id is the TAIL program's hash,
@@ -641,6 +668,53 @@ mod tests {
     #[test]
     fn dig_node_port_is_canonical() {
         assert_eq!(DIG_NODE_PORT, 9778);
+    }
+
+    /// Every bootstrap entry must be a `host:port` authority on the canonical
+    /// node port.
+    ///
+    /// A bootstrap entry is dialed as a raw TCP authority, so a URL-shaped or
+    /// port-less value would fail to parse at startup — and the failure would
+    /// look like "the network is empty" rather than "the constant is wrong",
+    /// which is precisely the symptom this constant exists to remove.
+    #[test]
+    fn bootstrap_peers_are_host_port_authorities_on_the_node_port() {
+        assert!(
+            !DIG_BOOTSTRAP_PEERS.is_empty(),
+            "an empty bootstrap set leaves a fresh node with zero dialable peers"
+        );
+        for entry in DIG_BOOTSTRAP_PEERS {
+            let (host, port) = entry
+                .rsplit_once(':')
+                .unwrap_or_else(|| panic!("bootstrap entry {entry} is not host:port"));
+            assert!(
+                !host.is_empty(),
+                "bootstrap entry {entry} has an empty host"
+            );
+            assert!(
+                !host.contains("://"),
+                "bootstrap entry {entry} must be an authority, not a URL"
+            );
+            assert_eq!(
+                port.parse::<u16>().ok(),
+                Some(DIG_NODE_PORT),
+                "bootstrap entry {entry} must use the canonical node port"
+            );
+        }
+    }
+
+    /// The bootstrap set must anchor on the public always-on node.
+    ///
+    /// `rpc.dig.net` is the one host guaranteed to be reachable and running, so
+    /// its absence would silently return a fresh node to zero peers.
+    #[test]
+    fn bootstrap_peers_include_the_public_anchor() {
+        assert!(
+            DIG_BOOTSTRAP_PEERS
+                .iter()
+                .any(|e| e.starts_with("rpc.dig.net:")),
+            "the public rpc.dig.net anchor must be in the bootstrap set"
+        );
     }
 
     /// The local-node hostname must equal the expected default.

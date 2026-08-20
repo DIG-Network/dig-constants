@@ -46,6 +46,18 @@ accompanied by a semver-major version bump.
 | `DIG_NODE_PORT` | `pub const u16` | Default localhost port for client→node connection (§7) |
 | `BootstrapPeer` | `pub struct` | One always-on bootstrap peer: pinned `peer_id_hex` + `authority` (§7a) |
 | `DIG_BOOTSTRAP_PEERS` | `pub const &[BootstrapPeer]` | Canonical bootstrap peer set, currently EMPTY (§7a) |
+| `DIG_BOOTSTRAP_PEERS_ENV` | `pub const &str` | Name of the bootstrap override environment variable (§7a) |
+| `DIG_BOOTSTRAP_PEERS_DISABLED` | `pub const &str` | Sentinel disabling bootstrap dialing (§7a) |
+| `BootstrapAuthority` | `pub struct` | A parsed authority: `host` (brackets stripped) + `port` (§7a) |
+| `BootstrapAuthority::is_on_default_node_port()` | `fn(&self) -> bool` | Whether the port equals `DIG_NODE_PORT` (§7a) |
+| `BootstrapAuthorityError` | `pub enum` | The eight distinguishable authority faults (§7a) |
+| `parse_bootstrap_authority()` | `fn(&str) -> Result<BootstrapAuthority, BootstrapAuthorityError>` | THE authority parser (§7a) |
+| `is_wellformed_peer_id()` | `fn(&str) -> bool` | Whether a `peer_id` is 64 hex chars (§7a) |
+| `ParsedBootstrapPeer` | `pub struct` | A parsed override entry: optional identity + authority (§7a) |
+| `BootstrapPeerError` | `pub enum` | Identity faults, plus a wrapped `BootstrapAuthorityError` (§7a) |
+| `parse_bootstrap_peer()` | `fn(&str) -> Result<ParsedBootstrapPeer, BootstrapPeerError>` | THE `peer_id@host:port` entry parser (§7a) |
+| `BootstrapPeer::parse_authority()` | `fn(&self) -> Result<BootstrapAuthority<'static>, _>` | Parse a canonical entry's authority (§7a) |
+| `BootstrapPeer::is_dialable()` | `fn(&self) -> bool` | Whether the entry carries a well-formed pinned identity (§7a) |
 | `DIG_ASSET_ID` | `pub const Bytes32` | Canonical $DIG CAT asset id (TAIL hash) (§8) |
 
 2.1. `NetworkConstants`'s field is private. Consumers MUST reach the underlying
@@ -241,19 +253,50 @@ address. An IPv6 literal MUST be bracketed — `[2606:4941::1]:9778`. An unbrack
 literal MUST be rejected: `2606:4941::1:9778` parses as host `2606:4941::1` on port `9778`
 only by coincidence of the last colon, so accepting it would let a malformed entry look valid.
 
+7a.4a. This rule is EXPORTED, not merely described. `parse_bootstrap_authority` is the single
+normative implementation for the whole ecosystem, and a consumer MUST call it rather than
+re-derive the grammar. The reason is specific: a wrong implementation (a plain split at the
+last colon) agrees with the right one on every input EXCEPT an unbracketed IPv6 literal, so two
+independent implementations pass each other's obvious tests and diverge only on the one shape
+IPv6-first dialing makes likely. `parse_bootstrap_peer` likewise owns the per-entry
+`peer_id@host:port` grammar of the §7a.7 override.
+
+7a.4b. `parse_bootstrap_authority` returns `host` with any IPv6 brackets REMOVED (`[::1]:9778`
+yields `::1`), because that is the form an address parser and a TLS name check both require; a
+host handed onward still bracketed fails both.
+
+7a.4c. Faults MUST stay distinguishable. `BootstrapAuthorityError` has one variant per operator
+mistake — `Empty`, `LooksLikeUrl`, `UnclosedBracket`, `UnbracketedIpv6Literal`, `MissingPort`,
+`EmptyHost`, `UnparseablePort`, `ZeroPort` — and `BootstrapPeerError` separates `EmptyPeerId`
+and `MalformedPeerId` from a wrapped `Authority(..)`. Each renders a distinct `Display` message.
+These are different fixes (bracket the address, add a port, correct a typo, supply a host,
+correct the identity), so a single shared fault would send an operator to re-read the wrong part
+of their configuration. Collapsing two variants, or giving two variants the same message, is a
+breaking change to this contract.
+
+7a.4d. The parser reports the canonical port, it does NOT enforce it. `port` is returned as
+written and `BootstrapAuthority::is_on_default_node_port` answers the canonical-port question
+separately, because an entry in `DIG_BOOTSTRAP_PEERS` MUST be on `DIG_NODE_PORT` (§7a.1) while
+an operator override MAY legitimately name a peer on another port — enforcing inside the parser
+would reject valid operator input.
+
 7a.5. An entry whose `peer_id_hex` is `None` MUST be SKIPPED rather than dialed. An unpinned
 dial would accept whatever identity answered at that address, which is the exact property the
-SPKI pinning exists to deny.
+SPKI pinning exists to deny. An entry whose `peer_id_hex` is `Some` but NOT well-formed is
+skipped on the same grounds: `BootstrapPeer::is_dialable` is true only for a `Some` holding
+exactly 64 hex characters, so a typo cannot degrade into an unpinned dial.
 
 7a.6. Membership in this set is NOT a trust grant. A bootstrap peer is an ordinary untrusted
 dialled peer: it carries no authority over chain facts, no exemption from cross-peer agreement,
 and no privilege over a peer learned via peer exchange. A consumer MUST verify everything a
 bootstrap peer says exactly as it verifies a stranger's claim.
 
-7a.7. Override semantics (defined by the consumer, stated here for the contract): an operator
-overrides the set with the `DIG_BOOTSTRAP_PEERS` environment variable, a comma-separated
-`peer_id@host:port` list, and disables bootstrap dialing entirely with `DIG_BOOTSTRAP_PEERS=off`
-for an air-gapped node — the same shape `DIG_RELAY_URL` (§6) uses.
+7a.7. Override semantics: an operator overrides the set with the environment variable named by
+`DIG_BOOTSTRAP_PEERS_ENV` (`DIG_BOOTSTRAP_PEERS`), a comma-separated `peer_id@host:port` list,
+and disables bootstrap dialing entirely by setting it to `DIG_BOOTSTRAP_PEERS_DISABLED` (`off`)
+for an air-gapped node — the same shape `DIG_RELAY_URL` (§6) uses. Both spellings are exported
+constants so a consumer never writes them as literals. The consumer owns splitting on `,` and
+recognising the sentinel; this crate owns the per-entry grammar (§7a.4a).
 
 7a.8. Adding an entry to this set is an ADDITIVE minor change here and a coordinated cross-repo
 event in practice: consumers pick it up on their next dependency bump.
@@ -339,6 +382,11 @@ All values are compile-time constants; misuse is impossible at runtime.
 - I-9: every entry present in `DIG_BOOTSTRAP_PEERS` has an `authority` that is a dialable
   `host:port` on `DIG_NODE_PORT` (IPv6 literals bracketed), and a `peer_id_hex` that is
   either `None` or exactly 64 hex characters (§7a).
+- I-10: `parse_bootstrap_authority` accepts a bracketed IPv6 literal and returns its host
+  unbracketed, and REJECTS an unbracketed IPv6 literal as
+  `BootstrapAuthorityError::UnbracketedIpv6Literal` (§7a.4a, §7a.4b).
+- I-11: no two `BootstrapAuthorityError` variants share a `Display` message, and no variant is
+  merged with another without a semver-major bump (§7a.4c).
 
 ## 10. Versioning and compatibility
 
@@ -383,3 +431,7 @@ tags and manual dispatch.
 | C-14 | An empty `DIG_BOOTSTRAP_PEERS` is a valid state; consumers MUST NOT substitute their own fallback address | MUST |
 | C-15 | An entry with `peer_id_hex == None` is skipped, never dialed unpinned | MUST |
 | C-16 | Bootstrap membership confers no trust; a bootstrap peer is verified as any untrusted peer is | MUST |
+| C-17 | Consumers parse bootstrap authorities and override entries via this crate's exported parsers, never a re-derived grammar | MUST |
+| C-18 | Authority and peer faults are distinguishable per mistake, each with its own `Display` message | MUST |
+| C-19 | A parsed `host` is returned with IPv6 brackets stripped | MUST |
+| C-20 | The parser reports the canonical port via `is_on_default_node_port`, and does not enforce it | MUST |

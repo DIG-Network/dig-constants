@@ -319,6 +319,13 @@ pub struct BootstrapPeer {
     /// pinning exists to deny.
     pub peer_id_hex: Option<&'static str>,
     /// The `host:port` authority the peer answers on ([`DIG_NODE_PORT`]).
+    ///
+    /// A hostname resolving to both families is preferred, because peer dialing
+    /// is IPv6-first with IPv4 only as a fallback. A literal address MAY be
+    /// used, and an IPv6 literal MUST be bracketed — `[2606:4941::1]:9778` — so
+    /// the port separator stays unambiguous. An unbracketed IPv6 literal is
+    /// rejected: `2606:4941::1:9778` would otherwise parse as the host
+    /// `2606:4941::1` on port `9778` purely by coincidence of the last colon.
     pub authority: &'static str,
 }
 
@@ -334,17 +341,30 @@ pub struct BootstrapPeer {
 /// `DIG_BOOTSTRAP_PEERS=off` for an air-gapped node — the same shape
 /// [`DIG_RELAY_URL`] uses.
 ///
-/// # Pending identity
+/// # Deliberately EMPTY until the public peer endpoint is deployed
 ///
-/// `rpc.dig.net`'s `peer_id` is derived from the certificate its peer endpoint
-/// presents, so it exists only once that endpoint is deployed and is therefore
-/// carried as `None` here. The dial mechanism is complete and activates when the
-/// operator fills this in; until then a node skips the entry rather than
-/// dialing an unpinned identity.
-pub const DIG_BOOTSTRAP_PEERS: &[BootstrapPeer] = &[BootstrapPeer {
-    peer_id_hex: None,
-    authority: "rpc.dig.net:9778",
-}];
+/// The DIG node-to-node mTLS peer interface is not yet reachable on any host:
+/// the canonical peer authority is `node-rpc.dig.net`, whose infrastructure
+/// ships behind a default-off flag and answers on no port today, and
+/// `rpc.dig.net` itself is the CloudFront read gateway — it has no peer
+/// listener at all. The published `peer_id` likewise exists only once that
+/// endpoint presents its certificate.
+///
+/// So both halves of an entry are facts only the operator of that endpoint can
+/// supply, and this set stays EMPTY rather than naming an address that answers
+/// nothing. An empty set is honest and consumable — a node dials nothing and
+/// falls back to its relay, PEX and DHT paths — whereas a fabricated entry
+/// spends every startup dialing a dead host and reports the network as
+/// unreachable rather than as unconfigured.
+///
+/// # Membership is NOT a trust grant
+///
+/// A bootstrap peer is an ordinary UNTRUSTED dialled peer (NC-12). Appearing
+/// here means only "a node may learn its first addresses from this host": it
+/// confers no authority over chain facts, no exemption from cross-peer
+/// agreement, and no privilege over a peer learned via peer exchange. Anything
+/// a bootstrap peer says is verified exactly as a stranger's claim is.
+pub const DIG_BOOTSTRAP_PEERS: &[BootstrapPeer] = &[];
 
 // =============================================================================
 // DIG CAT asset id ($DIG token)
@@ -695,77 +715,124 @@ mod tests {
         assert_eq!(DIG_NODE_PORT, 9778);
     }
 
-    /// Every bootstrap entry must be a `host:port` authority on the canonical
-    /// node port.
+    /// Split a bootstrap authority into `(host, port)`, rejecting shapes a
+    /// dial cannot use.
     ///
-    /// A bootstrap entry is dialed as a raw TCP authority, so a URL-shaped or
-    /// port-less value would fail to parse at startup — and the failure would
-    /// look like "the network is empty" rather than "the constant is wrong",
-    /// which is precisely the symptom this constant exists to remove.
-    #[test]
-    fn bootstrap_peers_are_host_port_authorities_on_the_node_port() {
-        assert!(
-            !DIG_BOOTSTRAP_PEERS.is_empty(),
-            "an empty bootstrap set leaves a fresh node with zero dialable peers"
-        );
-        for entry in DIG_BOOTSTRAP_PEERS {
-            let authority = entry.authority;
-            let (host, port) = authority
-                .rsplit_once(':')
-                .unwrap_or_else(|| panic!("bootstrap entry {authority} is not host:port"));
-            assert!(
-                !host.is_empty(),
-                "bootstrap entry {authority} has an empty host"
-            );
-            assert!(
-                !host.contains("://"),
-                "bootstrap entry {authority} must be an authority, not a URL"
-            );
-            assert_eq!(
-                port.parse::<u16>().ok(),
-                Some(DIG_NODE_PORT),
-                "bootstrap entry {authority} must use the canonical node port"
-            );
+    /// Bracket-aware on purpose: a plain "split at the last colon" accepts an
+    /// unbracketed IPv6 literal by coincidence, which is the one shape the
+    /// IPv6-first peer rule makes likely and the naive rule gets wrong.
+    fn split_authority(authority: &str) -> Option<(&str, &str)> {
+        if let Some(rest) = authority.strip_prefix('[') {
+            let (host, rest) = rest.split_once(']')?;
+            return Some((host, rest.strip_prefix(':')?));
+        }
+        let (host, port) = authority.rsplit_once(':')?;
+        if host.contains(':') {
+            return None; // an unbracketed IPv6 literal
+        }
+        Some((host, port))
+    }
+
+    /// Whether an authority is a dialable `host:port` on the canonical node port.
+    fn authority_is_dialable(authority: &str) -> bool {
+        if authority.contains("://") {
+            return false;
+        }
+        match split_authority(authority) {
+            Some((host, port)) => {
+                !host.is_empty() && port.parse::<u16>().ok() == Some(DIG_NODE_PORT)
+            }
+            None => false,
         }
     }
 
-    /// The bootstrap set must anchor on the public always-on node.
+    /// Whether a declared `peer_id` is a well-formed 64-hex identity.
+    fn peer_id_is_wellformed(hex: &str) -> bool {
+        hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit())
+    }
+
+    /// The authority shape MUST be able to express an IPv6 endpoint.
     ///
-    /// `rpc.dig.net` is the one host guaranteed to be reachable and running, so
-    /// its absence would silently return a fresh node to zero peers.
+    /// Peer dialing is IPv6-first, so a representation that cannot carry an
+    /// IPv6 address at all would be wrong on arrival — and the failure would
+    /// surface only on an IPv6-only host, long after the constant shipped.
     #[test]
-    fn bootstrap_peers_include_the_public_anchor() {
+    fn authority_shape_expresses_a_bracketed_ipv6_endpoint() {
+        assert!(authority_is_dialable("[2606:4941::1]:9778"));
+        assert!(authority_is_dialable("[::1]:9778"));
+        assert!(authority_is_dialable("node-rpc.dig.net:9778"));
+        assert!(authority_is_dialable("44.217.228.224:9778"));
+    }
+
+    /// Shapes a dial cannot use MUST be rejected.
+    ///
+    /// Each case is one a nearer-but-wrong rule accepts: an unbracketed IPv6
+    /// literal passes a last-colon split, a URL passes it with a `scheme//host`
+    /// "host", and a wrong port passes any check that only asserts *a* port is
+    /// present.
+    #[test]
+    fn undialable_authority_shapes_are_rejected() {
         assert!(
-            DIG_BOOTSTRAP_PEERS
-                .iter()
-                .any(|e| e.authority.starts_with("rpc.dig.net:")),
-            "the public rpc.dig.net anchor must be in the bootstrap set"
+            !authority_is_dialable("2606:4941::1:9778"),
+            "an unbracketed IPv6 literal is ambiguous and must be rejected"
+        );
+        assert!(
+            !authority_is_dialable("https://node-rpc.dig.net:9778"),
+            "a URL is not an authority"
+        );
+        assert!(
+            !authority_is_dialable("node-rpc.dig.net"),
+            "a port-less host is not dialable"
+        );
+        assert!(
+            !authority_is_dialable(":9778"),
+            "the host must not be empty"
+        );
+        assert!(
+            !authority_is_dialable("node-rpc.dig.net:9779"),
+            "the port must be the canonical node port, not merely a valid port"
+        );
+        assert!(
+            authority_is_dialable("node-rpc.dig.net:9778"),
+            "the at-bound port must pass, or the rejection above proves nothing"
         );
     }
 
-    /// A declared `peer_id` must be a well-formed 64-hex identity.
+    /// A declared `peer_id` MUST be exactly 64 hex characters.
     ///
     /// The dial pins the presented certificate against this value, so a
     /// malformed one does not fail loudly — it makes the entry permanently
     /// unusable while still LOOKING configured, which is indistinguishable from
-    /// an unreachable peer.
+    /// an unreachable peer. Pinned from both sides: 64 passes, 63 and 65 fail.
     #[test]
-    fn declared_bootstrap_peer_ids_are_64_hex() {
+    fn peer_id_must_be_exactly_64_hex_chars() {
+        assert!(peer_id_is_wellformed(&"a".repeat(64)));
+        assert!(!peer_id_is_wellformed(&"a".repeat(63)));
+        assert!(!peer_id_is_wellformed(&"a".repeat(65)));
+        assert!(!peer_id_is_wellformed(&format!("{}z", "a".repeat(63))));
+    }
+
+    /// Every entry actually present in the canonical set MUST satisfy both
+    /// shapes.
+    ///
+    /// The set is EMPTY today (the public peer endpoint is not deployed), so
+    /// this test is a live guard for the entries an operator adds later, not the
+    /// proof that the guard works — the fixture tests above are that proof.
+    #[test]
+    fn every_canonical_bootstrap_entry_is_wellformed() {
         for entry in DIG_BOOTSTRAP_PEERS {
-            let Some(hex) = entry.peer_id_hex else {
-                continue;
-            };
-            assert_eq!(
-                hex.len(),
-                64,
-                "bootstrap peer_id for {} must be 64 hex chars",
-                entry.authority
-            );
             assert!(
-                hex.chars().all(|c| c.is_ascii_hexdigit()),
-                "bootstrap peer_id for {} must be hex",
+                authority_is_dialable(entry.authority),
+                "bootstrap authority {} is not a dialable host:port on the node port",
                 entry.authority
             );
+            if let Some(hex) = entry.peer_id_hex {
+                assert!(
+                    peer_id_is_wellformed(hex),
+                    "bootstrap peer_id for {} is not 64 hex chars",
+                    entry.authority
+                );
+            }
         }
     }
 

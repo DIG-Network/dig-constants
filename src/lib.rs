@@ -294,6 +294,44 @@ pub const DIG_LOCAL_HOST: &str = "dig.local";
 /// their own copy of `rpc.dig.net`.
 pub const RPC_DIG_NET_URL: &str = "https://rpc.dig.net";
 
+/// The always-on peer anchors a node dials at startup, as `peer_id@host:port`.
+///
+/// # Why a fresh node needs this
+///
+/// Every other way a node learns peers already requires having one: peer exchange
+/// spreads the peers a live link's far end knows, the DHT answers queries routed
+/// through peers already in the table, and a relay reservation only makes a node
+/// *reachable*. A node installed onto a machine that has never run one therefore
+/// has nothing to dial. This set is the one input that does not presuppose its own
+/// output.
+///
+/// # Why the host is `node-rpc.dig.net` and NOT `rpc.dig.net`
+///
+/// These are different machines with different jobs, and confusing them ships a
+/// dial at a closed port. [`RPC_DIG_NET_URL`] is the §5.3 client→node READ gateway:
+/// a CloudFront distribution that terminates HTTPS and cannot carry the mTLS peer
+/// protocol — its peer ports are closed. `node-rpc.dig.net` is that distribution's
+/// ORIGIN, an instance that answers the peer protocol directly. Both names are
+/// legitimate and they MUST NOT be collapsed into one another.
+///
+/// # Why each entry carries an identity
+///
+/// The node↔node interface is mTLS with the peer's certificate pinned by
+/// `peer_id = SHA-256(TLS SPKI DER)`, so an address alone is not dialable. An entry
+/// without an identity could only be dialled unpinned — accepting whatever answered
+/// at that address, which is exactly what the pinning exists to deny.
+///
+/// # A bootstrap peer is NOT a trusted peer
+///
+/// Being well-known is not being trusted. An anchor gets no trust flag, bypasses no
+/// corroboration, and counts as exactly one voice — the same as any peer learned by
+/// exchange. Consumers MUST treat it as untrusted (NC-12) and MUST tolerate every
+/// entry here being unreachable: a node whose bootstrap dials all fail is still a
+/// working node, and a hard dependency on one host would make it a single point of
+/// failure for every fresh node in the network.
+pub const DIG_BOOTSTRAP_PEERS: &[&str] =
+    &["741592c0e1e1e9b1a02d3e0bb165bfe54b7adbb5878a3c5de59893949524b68f@node-rpc.dig.net:9444"];
+
 // =============================================================================
 // DIG CAT asset id ($DIG token)
 //
@@ -671,6 +709,94 @@ mod tests {
             RPC_DIG_NET_URL.starts_with("https://"),
             "the public read gateway must use HTTPS"
         );
+    }
+
+    // -- Bootstrap anchor guards -------------------------------------------
+    //
+    // The bootstrap set is the one peer input that does not presuppose its own
+    // output, so a wrong value here strands every fresh node in the network.
+    // The two failure modes it can have are BOTH the value itself rather than
+    // the mechanism that consumes it, which is why they are pinned here.
+
+    /// The bootstrap set names the PEER interface host, never the read gateway.
+    ///
+    /// `rpc.dig.net` is CloudFront (distribution `E3L33T1REWMUIK`): it terminates
+    /// HTTPS and cannot carry the mTLS peer protocol, and its :9444/:9445 are
+    /// closed. The peer interface is live on `node-rpc.dig.net`, the CloudFront
+    /// ORIGIN. The two hosts differ by one label, so this asserts the gateway host
+    /// is ABSENT rather than merely asserting some host is present — a test that
+    /// only checked "a bootstrap entry exists" passes with the closed-port host in
+    /// it, which is the nearest wrong value and the one #923's own premise names.
+    #[test]
+    fn bootstrap_peers_name_the_peer_host_not_the_read_gateway() {
+        assert!(
+            !DIG_BOOTSTRAP_PEERS.is_empty(),
+            "a fresh node with no bootstrap anchor has nothing to dial"
+        );
+        for entry in DIG_BOOTSTRAP_PEERS {
+            let authority = entry.split_once('@').expect("pinned identity").1;
+            let host = authority.rsplit_once(':').expect("explicit port").0;
+            assert_ne!(
+                host, "rpc.dig.net",
+                "{entry} dials the CloudFront read gateway, whose peer ports are closed"
+            );
+            assert!(
+                host.ends_with(".dig.net"),
+                "{entry} must anchor on a DIG-operated host"
+            );
+        }
+    }
+
+    /// Every bootstrap entry is expressible in the operator override's own syntax:
+    /// a 64-hex pinned identity, then `@host:port`.
+    ///
+    /// The identity half is load-bearing rather than decorative. The peer transport
+    /// pins `peer_id = SHA-256(TLS SPKI DER)`, so an entry carrying no identity
+    /// would either be skipped (no anchor) or dialled unpinned (accepting whatever
+    /// answered at that address) — the exact outcome the pinning exists to deny.
+    #[test]
+    fn every_bootstrap_entry_carries_a_pinned_identity_and_an_explicit_port() {
+        for entry in DIG_BOOTSTRAP_PEERS {
+            let (peer_id, authority) = entry
+                .split_once('@')
+                .unwrap_or_else(|| panic!("{entry} carries no pinned identity"));
+            assert_eq!(peer_id.len(), 64, "{entry}: peer_id must be 64 hex chars");
+            assert!(
+                peer_id.chars().all(|c| c.is_ascii_hexdigit()),
+                "{entry}: peer_id must be hex"
+            );
+            let (host, port) = authority
+                .rsplit_once(':')
+                .unwrap_or_else(|| panic!("{entry} carries no explicit port"));
+            assert!(!host.is_empty(), "{entry}: empty host");
+            assert!(
+                port.parse::<u16>().is_ok(),
+                "{entry}: port must be a u16, got {port}"
+            );
+        }
+    }
+
+    /// The anchor is reachable on the peer port, not on the local-RPC port.
+    ///
+    /// `DIG_NODE_PORT` (9778) is the §5.3 client→node READ port and is a different
+    /// role entirely; an anchor published on it would be dialled by the peer stack
+    /// and never answer. Asserting the inequality keeps the two roles from
+    /// collapsing into one another the way the two hostnames already can.
+    #[test]
+    fn bootstrap_port_is_the_peer_port_not_the_local_rpc_port() {
+        for entry in DIG_BOOTSTRAP_PEERS {
+            let port: u16 = entry
+                .rsplit_once(':')
+                .expect("explicit port")
+                .1
+                .parse()
+                .expect("numeric port");
+            assert_ne!(
+                port, DIG_NODE_PORT,
+                "{entry} dials the local JSON-RPC port, not the peer port"
+            );
+            assert_eq!(port, 9444, "{entry} must dial the DIG peer port");
+        }
     }
 
     // -- Genesis challenge canonical-value guards --------------------------

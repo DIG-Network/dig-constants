@@ -333,6 +333,360 @@ pub const DIG_BOOTSTRAP_PEERS: &[&str] =
     &["741592c0e1e1e9b1a02d3e0bb165bfe54b7adbb5878a3c5de59893949524b68f@node-rpc.dig.net:9444"];
 
 // =============================================================================
+// DIG bootstrap peers
+//
+// A node with no relay reservation and no remembered peers has nothing to dial
+// and forms zero connections. The bootstrap set is the always-on anchor that
+// gives such a node its first dialable peer, exactly as Chia's introducers seed
+// a fresh full node.
+// =============================================================================
+
+/// One always-on peer a DIG node dials at startup to obtain its FIRST peers.
+///
+/// Carries both halves a dial needs, because the node↔node mTLS peer interface
+/// pins the peer's certificate SPKI against an EXPECTED identity: an address
+/// alone is not dialable on that interface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BootstrapPeer {
+    /// The peer's 64-hex `peer_id` (`SHA-256(TLS SPKI DER)`), which the mTLS
+    /// handshake pins the presented certificate against.
+    ///
+    /// `None` for an entry whose identity is not yet known. A node SKIPS such an
+    /// entry rather than dialing it unpinned — an unpinned dial would accept
+    /// whatever identity answered at that address, which is the property the
+    /// pinning exists to deny.
+    pub peer_id_hex: Option<&'static str>,
+    /// The `host:port` authority the peer answers on ([`DIG_NODE_PORT`]).
+    ///
+    /// A hostname resolving to both families is preferred, because peer dialing
+    /// is IPv6-first with IPv4 only as a fallback. A literal address MAY be
+    /// used, and an IPv6 literal MUST be bracketed — `[2606:4941::1]:9778` — so
+    /// the port separator stays unambiguous. An unbracketed IPv6 literal is
+    /// rejected: `2606:4941::1:9778` would otherwise parse as the host
+    /// `2606:4941::1` on port `9778` purely by coincidence of the last colon.
+    pub authority: &'static str,
+}
+
+/// The always-on peers a DIG node dials at startup to obtain its FIRST peers.
+///
+/// A freshly-installed node knows no peers: peer exchange and the DHT can only
+/// spread peers a node already has, and a relay reservation only makes the node
+/// reachable, never populates its address book. Without a bootstrap set such a
+/// node reports `connected_peers = 0` forever.
+///
+/// Operators override the set with the `DIG_BOOTSTRAP_PEERS` environment
+/// variable (a comma-separated `peer_id@host:port` list) or disable it with
+/// `DIG_BOOTSTRAP_PEERS=off` for an air-gapped node — the same shape
+/// [`DIG_RELAY_URL`] uses.
+///
+/// # Deliberately EMPTY until the public peer endpoint is deployed
+///
+/// The DIG node-to-node mTLS peer interface is not yet reachable on any host:
+/// the canonical peer authority is `node-rpc.dig.net`, whose infrastructure
+/// ships behind a default-off flag and answers on no port today, and
+/// `rpc.dig.net` itself is the CloudFront read gateway — it has no peer
+/// listener at all. The published `peer_id` likewise exists only once that
+/// endpoint presents its certificate.
+///
+/// So both halves of an entry are facts only the operator of that endpoint can
+/// supply, and this set stays EMPTY rather than naming an address that answers
+/// nothing. An empty set is honest and consumable — a node dials nothing and
+/// falls back to its relay, PEX and DHT paths — whereas a fabricated entry
+/// spends every startup dialing a dead host and reports the network as
+/// unreachable rather than as unconfigured.
+///
+/// # Membership is NOT a trust grant
+///
+/// A bootstrap peer is an ordinary UNTRUSTED dialled peer (NC-12). Appearing
+/// here means only "a node may learn its first addresses from this host": it
+/// confers no authority over chain facts, no exemption from cross-peer
+/// agreement, and no privilege over a peer learned via peer exchange. Anything
+/// a bootstrap peer says is verified exactly as a stranger's claim is.
+pub const DIG_BOOTSTRAP_PEERS: &[BootstrapPeer] = &[];
+
+/// The environment variable an operator uses to override [`DIG_BOOTSTRAP_PEERS`].
+///
+/// Named here so a consumer never spells it as a literal and drifts from the
+/// documented contract.
+pub const DIG_BOOTSTRAP_PEERS_ENV: &str = "DIG_BOOTSTRAP_PEERS";
+
+/// The sentinel value of [`DIG_BOOTSTRAP_PEERS_ENV`] that disables bootstrap
+/// dialing entirely, for an air-gapped node.
+pub const DIG_BOOTSTRAP_PEERS_DISABLED: &str = "off";
+
+/// A bootstrap authority split into the two parts a dial needs.
+///
+/// Borrows from the input, so parsing a `&'static str` out of
+/// [`DIG_BOOTSTRAP_PEERS`] yields a `BootstrapAuthority<'static>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BootstrapAuthority<'a> {
+    /// The host, with any IPv6 brackets REMOVED — `[::1]:9778` yields `::1`,
+    /// which is the form an address parser and a TLS name check both expect.
+    pub host: &'a str,
+    /// The TCP port, already parsed and known non-zero.
+    pub port: u16,
+}
+
+impl BootstrapAuthority<'_> {
+    /// Whether this authority is on the canonical [`DIG_NODE_PORT`].
+    ///
+    /// Kept OUT of parsing on purpose: an entry in [`DIG_BOOTSTRAP_PEERS`] MUST
+    /// be on the canonical port, but an operator override MAY legitimately name
+    /// a peer on another port, so refusing a non-default port inside the parser
+    /// would reject valid operator input.
+    pub fn is_on_default_node_port(&self) -> bool {
+        self.port == DIG_NODE_PORT
+    }
+}
+
+/// Why a bootstrap authority could not be parsed.
+///
+/// Each variant is a DIFFERENT operator mistake with a different fix, so they
+/// stay distinguishable rather than collapsing into one bad-input value: an
+/// error that cannot say which branch fired sends the operator to re-read the
+/// wrong part of their configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BootstrapAuthorityError {
+    /// The authority was empty.
+    Empty,
+    /// The value is a URL, not a `host:port` authority (it contains `://`).
+    LooksLikeUrl,
+    /// A bracketed IPv6 literal opened with `[` and never closed with `]`.
+    UnclosedBracket,
+    /// An IPv6 literal was written without brackets.
+    ///
+    /// `2606:4941::1:9778` is ambiguous: a naive split at the last colon reads
+    /// it as host `2606:4941::1` on port `9778` purely by coincidence, so it is
+    /// refused rather than guessed. Write `[2606:4941::1]:9778`.
+    UnbracketedIpv6Literal,
+    /// No `:port` was present at all.
+    MissingPort,
+    /// The host part was empty, as in `:9778`.
+    EmptyHost,
+    /// The port was not a base-10 `u16`.
+    UnparseablePort,
+    /// The port parsed as `0`, which is not a dialable port.
+    ZeroPort,
+}
+
+impl core::fmt::Display for BootstrapAuthorityError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let message = match self {
+            Self::Empty => "bootstrap authority is empty",
+            Self::LooksLikeUrl => {
+                "bootstrap authority must be a host:port authority, not a URL (remove the scheme)"
+            }
+            Self::UnclosedBracket => {
+                "bootstrap authority opens an IPv6 bracket with [ but never closes it with ]"
+            }
+            Self::UnbracketedIpv6Literal => {
+                "bootstrap authority looks like an unbracketed IPv6 literal; write it as [addr]:port"
+            }
+            Self::MissingPort => "bootstrap authority has no :port",
+            Self::EmptyHost => "bootstrap authority has an empty host",
+            Self::UnparseablePort => "bootstrap authority port is not a number in 1..=65535",
+            Self::ZeroPort => "bootstrap authority port 0 is not dialable",
+        };
+        f.write_str(message)
+    }
+}
+
+impl std::error::Error for BootstrapAuthorityError {}
+
+/// Parse a bootstrap `host:port` authority.
+///
+/// This is the ONE implementation of the authority rule for the whole ecosystem.
+/// A consumer parsing the [`DIG_BOOTSTRAP_PEERS_ENV`] override MUST call this
+/// rather than re-derive it: the bracketed-IPv6 case is exactly where two
+/// implementations drift, because a wrong version differs from the right one on
+/// that single input shape and agrees on every other.
+///
+/// The port is returned as parsed and is NOT required to be [`DIG_NODE_PORT`];
+/// see [`BootstrapAuthority::is_on_default_node_port`] for why.
+///
+/// # Examples
+///
+/// ```
+/// use dig_constants::{parse_bootstrap_authority, BootstrapAuthorityError};
+///
+/// let parsed = parse_bootstrap_authority("[2606:4941::1]:9778").unwrap();
+/// assert_eq!(parsed.host, "2606:4941::1"); // brackets stripped
+/// assert_eq!(parsed.port, 9778);
+///
+/// assert_eq!(
+///     parse_bootstrap_authority("2606:4941::1:9778"),
+///     Err(BootstrapAuthorityError::UnbracketedIpv6Literal)
+/// );
+/// ```
+pub fn parse_bootstrap_authority(
+    authority: &str,
+) -> Result<BootstrapAuthority<'_>, BootstrapAuthorityError> {
+    if authority.is_empty() {
+        return Err(BootstrapAuthorityError::Empty);
+    }
+    if authority.contains("://") {
+        return Err(BootstrapAuthorityError::LooksLikeUrl);
+    }
+
+    let (host, port_text) = match authority.strip_prefix('[') {
+        Some(rest) => {
+            let (host, after) = rest
+                .split_once(']')
+                .ok_or(BootstrapAuthorityError::UnclosedBracket)?;
+            let port_text = after
+                .strip_prefix(':')
+                .ok_or(BootstrapAuthorityError::MissingPort)?;
+            (host, port_text)
+        }
+        None => {
+            let (host, port_text) = authority
+                .rsplit_once(':')
+                .ok_or(BootstrapAuthorityError::MissingPort)?;
+            if host.contains(':') {
+                return Err(BootstrapAuthorityError::UnbracketedIpv6Literal);
+            }
+            (host, port_text)
+        }
+    };
+
+    if host.is_empty() {
+        return Err(BootstrapAuthorityError::EmptyHost);
+    }
+    let port: u16 = port_text
+        .parse()
+        .map_err(|_| BootstrapAuthorityError::UnparseablePort)?;
+    if port == 0 {
+        return Err(BootstrapAuthorityError::ZeroPort);
+    }
+    Ok(BootstrapAuthority { host, port })
+}
+
+/// Whether a string is a well-formed DIG `peer_id`: exactly 64 hex characters
+/// (`SHA-256(TLS SPKI DER)`, hex-encoded).
+///
+/// Exported because the mTLS dial pins against this value, so a malformed one
+/// does not fail loudly — it makes an entry permanently unusable while still
+/// LOOKING configured, which an operator cannot distinguish from an unreachable
+/// peer.
+pub fn is_wellformed_peer_id(peer_id_hex: &str) -> bool {
+    peer_id_hex.len() == 64 && peer_id_hex.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// A parsed override entry: an optional pinned identity plus its authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParsedBootstrapPeer<'a> {
+    /// The pinned `peer_id`, or `None` when the entry named an address only.
+    ///
+    /// An entry with `None` MUST be skipped rather than dialed unpinned.
+    pub peer_id_hex: Option<&'a str>,
+    /// The parsed authority.
+    pub authority: BootstrapAuthority<'a>,
+}
+
+/// Why a bootstrap override entry could not be parsed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BootstrapPeerError {
+    /// The `peer_id@` part was present but empty.
+    EmptyPeerId,
+    /// The `peer_id@` part was not 64 hex characters.
+    MalformedPeerId,
+    /// The authority half was not parseable; carries the specific reason.
+    Authority(BootstrapAuthorityError),
+}
+
+impl core::fmt::Display for BootstrapPeerError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::EmptyPeerId => f.write_str("bootstrap entry has an empty peer_id before @"),
+            Self::MalformedPeerId => {
+                f.write_str("bootstrap peer_id must be exactly 64 hex characters")
+            }
+            Self::Authority(inner) => write!(f, "{inner}"),
+        }
+    }
+}
+
+impl std::error::Error for BootstrapPeerError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Authority(inner) => Some(inner),
+            _ => None,
+        }
+    }
+}
+
+impl From<BootstrapAuthorityError> for BootstrapPeerError {
+    fn from(error: BootstrapAuthorityError) -> Self {
+        Self::Authority(error)
+    }
+}
+
+/// Parse ONE entry of the [`DIG_BOOTSTRAP_PEERS_ENV`] override, in the
+/// documented `peer_id@host:port` form.
+///
+/// A bare `host:port` with no `peer_id@` is accepted and yields
+/// `peer_id_hex: None` — the caller then SKIPS it rather than dialing unpinned.
+///
+/// The caller splits the variable on `,` and handles the
+/// [`DIG_BOOTSTRAP_PEERS_DISABLED`] sentinel; this function owns the per-entry
+/// grammar, which is the part two implementations would otherwise disagree on.
+///
+/// # Examples
+///
+/// ```
+/// use dig_constants::{parse_bootstrap_peer, BootstrapPeerError};
+///
+/// let id = "a".repeat(64);
+/// let entry = format!("{id}@[::1]:9778");
+/// let parsed = parse_bootstrap_peer(&entry).unwrap();
+/// assert_eq!(parsed.peer_id_hex, Some(id.as_str()));
+/// assert_eq!(parsed.authority.host, "::1");
+///
+/// // A short identity is reported as a bad identity, not as a bad address.
+/// assert_eq!(
+///     parse_bootstrap_peer("abc@node-rpc.dig.net:9778"),
+///     Err(BootstrapPeerError::MalformedPeerId)
+/// );
+/// ```
+pub fn parse_bootstrap_peer(entry: &str) -> Result<ParsedBootstrapPeer<'_>, BootstrapPeerError> {
+    let (peer_id_hex, authority_text) = match entry.split_once('@') {
+        Some((peer_id_hex, authority_text)) => {
+            if peer_id_hex.is_empty() {
+                return Err(BootstrapPeerError::EmptyPeerId);
+            }
+            if !is_wellformed_peer_id(peer_id_hex) {
+                return Err(BootstrapPeerError::MalformedPeerId);
+            }
+            (Some(peer_id_hex), authority_text)
+        }
+        None => (None, entry),
+    };
+    Ok(ParsedBootstrapPeer {
+        peer_id_hex,
+        authority: parse_bootstrap_authority(authority_text)?,
+    })
+}
+
+impl BootstrapPeer {
+    /// Parse this entry's authority.
+    ///
+    /// Returned as a `Result` rather than assumed valid so a consumer handles a
+    /// canonical entry and an operator-supplied one through one code path; the
+    /// crate test suite pins every canonical entry as parseable.
+    pub fn parse_authority(&self) -> Result<BootstrapAuthority<'static>, BootstrapAuthorityError> {
+        parse_bootstrap_authority(self.authority)
+    }
+
+    /// Whether this entry carries a pinned identity and may therefore be dialed.
+    ///
+    /// An entry without one is SKIPPED: an unpinned dial accepts whatever
+    /// identity answers at the address, which is the property pinning denies.
+    pub fn is_dialable(&self) -> bool {
+        self.peer_id_hex.is_some_and(is_wellformed_peer_id)
+    }
+}
+
+// =============================================================================
 // DIG CAT asset id ($DIG token)
 //
 // $DIG is a Chia CAT (CHIP-0004); its asset id is the TAIL program's hash,
@@ -679,6 +1033,262 @@ mod tests {
     #[test]
     fn dig_node_port_is_canonical() {
         assert_eq!(DIG_NODE_PORT, 9778);
+    }
+
+    /// The authority shape MUST be able to express an IPv6 endpoint.
+    ///
+    /// Peer dialing is IPv6-first, so a representation that cannot carry an IPv6
+    /// address at all would be wrong on arrival — and the failure would surface
+    /// only on an IPv6-only host, long after the constant shipped. Also pins the
+    /// bracket STRIPPING, since a host handed onward as `[::1]` fails every
+    /// address parse and TLS name check downstream.
+    #[test]
+    fn parses_a_bracketed_ipv6_endpoint_and_strips_the_brackets() {
+        let parsed = parse_bootstrap_authority("[2606:4941::1]:9778").expect("must parse");
+        assert_eq!(parsed.host, "2606:4941::1");
+        assert_eq!(parsed.port, 9778);
+        assert!(parsed.is_on_default_node_port());
+
+        let loopback = parse_bootstrap_authority("[::1]:9778").expect("must parse");
+        assert_eq!(loopback.host, "::1");
+    }
+
+    /// Hostnames and IPv4 literals parse unchanged.
+    #[test]
+    fn parses_hostname_and_ipv4_authorities() {
+        let named = parse_bootstrap_authority("node-rpc.dig.net:9778").expect("must parse");
+        assert_eq!((named.host, named.port), ("node-rpc.dig.net", 9778));
+
+        let v4 = parse_bootstrap_authority("44.217.228.224:9778").expect("must parse");
+        assert_eq!((v4.host, v4.port), ("44.217.228.224", 9778));
+    }
+
+    /// Every rejection MUST name the specific operator mistake.
+    ///
+    /// These are four different fixes — bracket the address, add a port, correct
+    /// a typo, supply a host — so a single shared bad-input error would send the
+    /// operator to re-read the wrong part of their configuration. Asserting the
+    /// exact variant is what stops a later refactor collapsing them.
+    #[test]
+    fn each_rejection_names_its_own_specific_mistake() {
+        use BootstrapAuthorityError as E;
+        assert_eq!(parse_bootstrap_authority(""), Err(E::Empty));
+        assert_eq!(
+            parse_bootstrap_authority("https://node-rpc.dig.net:9778"),
+            Err(E::LooksLikeUrl)
+        );
+        assert_eq!(
+            parse_bootstrap_authority("[2606:4941::1:9778"),
+            Err(E::UnclosedBracket)
+        );
+        assert_eq!(
+            parse_bootstrap_authority("2606:4941::1:9778"),
+            Err(E::UnbracketedIpv6Literal),
+            "an unbracketed IPv6 literal is ambiguous and must be rejected AS SUCH"
+        );
+        assert_eq!(
+            parse_bootstrap_authority("node-rpc.dig.net"),
+            Err(E::MissingPort)
+        );
+        assert_eq!(parse_bootstrap_authority("[::1]"), Err(E::MissingPort));
+        assert_eq!(parse_bootstrap_authority(":9778"), Err(E::EmptyHost));
+        assert_eq!(
+            parse_bootstrap_authority("node-rpc.dig.net:http"),
+            Err(E::UnparseablePort)
+        );
+        assert_eq!(
+            parse_bootstrap_authority("node-rpc.dig.net:99999"),
+            Err(E::UnparseablePort),
+            "a port above u16 range is unparseable, not merely non-canonical"
+        );
+        assert_eq!(
+            parse_bootstrap_authority("node-rpc.dig.net:0"),
+            Err(E::ZeroPort)
+        );
+    }
+
+    /// Every variant renders a message that identifies its own branch.
+    ///
+    /// A distinguishable enum whose `Display` collapses to one sentence is the
+    /// same defect wearing a type: the operator reads the message, not the
+    /// variant.
+    #[test]
+    fn every_authority_error_renders_a_distinct_message() {
+        use BootstrapAuthorityError as E;
+        let all = [
+            E::Empty,
+            E::LooksLikeUrl,
+            E::UnclosedBracket,
+            E::UnbracketedIpv6Literal,
+            E::MissingPort,
+            E::EmptyHost,
+            E::UnparseablePort,
+            E::ZeroPort,
+        ];
+        let rendered: Vec<String> = all.iter().map(|e| e.to_string()).collect();
+        for (index, message) in rendered.iter().enumerate() {
+            assert!(
+                !message.is_empty(),
+                "variant {index} renders an empty message"
+            );
+            assert_eq!(
+                rendered.iter().filter(|other| *other == message).count(),
+                1,
+                "message {message:?} is shared by more than one variant"
+            );
+        }
+    }
+
+    /// The canonical port is NOT enforced by the parser, and that is deliberate.
+    ///
+    /// An operator override may name a peer on another port. Pinned from both
+    /// sides so neither half can drift: the canonical port reports `true`, a
+    /// neighbouring port parses fine and reports `false`.
+    #[test]
+    fn default_node_port_is_reported_not_enforced() {
+        let canonical = parse_bootstrap_authority("node-rpc.dig.net:9778").expect("must parse");
+        assert!(canonical.is_on_default_node_port());
+
+        let other = parse_bootstrap_authority("node-rpc.dig.net:9779").expect("must parse");
+        assert_eq!(other.port, 9779);
+        assert!(
+            !other.is_on_default_node_port(),
+            "a non-canonical port must be reported as such, or the check is vacuous"
+        );
+    }
+
+    /// A `peer_id` MUST be exactly 64 hex characters.
+    ///
+    /// The dial pins the presented certificate against this value, so a
+    /// malformed one does not fail loudly — it makes the entry permanently
+    /// unusable while still LOOKING configured. Pinned from both sides: 64
+    /// passes, 63 and 65 fail.
+    #[test]
+    fn peer_id_must_be_exactly_64_hex_chars() {
+        assert!(is_wellformed_peer_id(&"a".repeat(64)));
+        assert!(is_wellformed_peer_id(&"0F".repeat(32)));
+        assert!(!is_wellformed_peer_id(&"a".repeat(63)));
+        assert!(!is_wellformed_peer_id(&"a".repeat(65)));
+        assert!(!is_wellformed_peer_id(&format!("{}z", "a".repeat(63))));
+        assert!(!is_wellformed_peer_id(""));
+    }
+
+    /// The override entry grammar parses `peer_id@host:port`.
+    #[test]
+    fn parses_a_pinned_override_entry() {
+        let id = "a".repeat(64);
+        let entry = format!("{id}@[2606:4941::1]:9778");
+        let parsed = parse_bootstrap_peer(&entry).expect("must parse");
+        assert_eq!(parsed.peer_id_hex, Some(id.as_str()));
+        assert_eq!(parsed.authority.host, "2606:4941::1");
+        assert_eq!(parsed.authority.port, 9778);
+    }
+
+    /// A bare authority is accepted and yields no identity, so the caller skips
+    /// it rather than dialing unpinned.
+    #[test]
+    fn override_entry_without_an_identity_yields_none() {
+        let parsed = parse_bootstrap_peer("node-rpc.dig.net:9778").expect("must parse");
+        assert_eq!(parsed.peer_id_hex, None);
+        assert_eq!(parsed.authority.host, "node-rpc.dig.net");
+    }
+
+    /// A bad identity and a bad address are DIFFERENT errors.
+    ///
+    /// Reporting a malformed identity as a bad address, or vice versa, points
+    /// the operator at the wrong half of the entry they typed.
+    #[test]
+    fn override_entry_errors_separate_identity_from_address() {
+        use BootstrapAuthorityError as A;
+        use BootstrapPeerError as E;
+        assert_eq!(
+            parse_bootstrap_peer("abc@node-rpc.dig.net:9778"),
+            Err(E::MalformedPeerId)
+        );
+        assert_eq!(
+            parse_bootstrap_peer("@node-rpc.dig.net:9778"),
+            Err(E::EmptyPeerId)
+        );
+        let id = "a".repeat(64);
+        assert_eq!(
+            parse_bootstrap_peer(&format!("{id}@2606:4941::1:9778")),
+            Err(E::Authority(A::UnbracketedIpv6Literal)),
+            "an address fault must surface the SPECIFIC authority reason, not a generic one"
+        );
+        assert_eq!(
+            parse_bootstrap_peer(&format!("{id}@node-rpc.dig.net")),
+            Err(E::Authority(A::MissingPort))
+        );
+    }
+
+    /// The disable sentinel and the env-var name are pinned, since a consumer
+    /// spelling either as a literal would drift from the documented contract.
+    #[test]
+    fn bootstrap_override_names_are_canonical() {
+        assert_eq!(DIG_BOOTSTRAP_PEERS_ENV, "DIG_BOOTSTRAP_PEERS");
+        assert_eq!(DIG_BOOTSTRAP_PEERS_DISABLED, "off");
+    }
+
+    /// An entry is dialable only when it carries a WELL-FORMED pinned identity.
+    ///
+    /// Three cases, because the interesting one is the middle: a `Some` holding
+    /// a malformed identity must NOT count as dialable, or a typo becomes an
+    /// unpinned dial.
+    #[test]
+    fn only_a_wellformed_pinned_entry_is_dialable() {
+        let unpinned = BootstrapPeer {
+            peer_id_hex: None,
+            authority: "node-rpc.dig.net:9778",
+        };
+        assert!(!unpinned.is_dialable());
+
+        let malformed = BootstrapPeer {
+            peer_id_hex: Some("abc"),
+            authority: "node-rpc.dig.net:9778",
+        };
+        assert!(
+            !malformed.is_dialable(),
+            "a malformed identity must not authorise a dial"
+        );
+
+        let valid_id = "a".repeat(64);
+        let pinned = BootstrapPeer {
+            peer_id_hex: Some(Box::leak(valid_id.into_boxed_str())),
+            authority: "node-rpc.dig.net:9778",
+        };
+        assert!(pinned.is_dialable());
+        assert_eq!(
+            pinned.parse_authority().expect("must parse").port,
+            DIG_NODE_PORT
+        );
+    }
+
+    /// Every entry actually present in the canonical set MUST satisfy both
+    /// shapes, on the canonical node port.
+    ///
+    /// The set is EMPTY today (the public peer endpoint is not deployed), so
+    /// this test is a live guard for the entries an operator adds later, not the
+    /// proof that the guard works — the tests above are that proof, because they
+    /// drive the same exported functions with real valid and real invalid input.
+    #[test]
+    fn every_canonical_bootstrap_entry_is_wellformed() {
+        for entry in DIG_BOOTSTRAP_PEERS {
+            let parsed = entry
+                .parse_authority()
+                .unwrap_or_else(|e| panic!("bootstrap authority {}: {e}", entry.authority));
+            assert!(
+                parsed.is_on_default_node_port(),
+                "bootstrap authority {} must use the canonical node port",
+                entry.authority
+            );
+            if let Some(hex) = entry.peer_id_hex {
+                assert!(
+                    is_wellformed_peer_id(hex),
+                    "bootstrap peer_id for {} is not 64 hex chars",
+                    entry.authority
+                );
+            }
+        }
     }
 
     /// The local-node hostname must equal the expected default.

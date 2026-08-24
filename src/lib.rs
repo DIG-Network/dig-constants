@@ -225,7 +225,7 @@ pub const DIG_MAINNET: NetworkConstants = NetworkConstants {
 // A DIG Node behind NAT cannot accept inbound dials, so it holds a constant
 // reservation with a publicly-reachable relay to stay discoverable. The
 // canonical public relay is `relay.dig.net`, serving the `RelayMessage`
-// WebSocket wire (RLY-001..RLY-007) on port 9450.
+// WebSocket wire (RLY-001..RLY-007) on port 443 (see the port note below).
 //
 // This constant is the single source of truth for that endpoint so consumers
 // (`dig-node`, `dig-gossip`) don't each hardcode it. It MUST stay byte-identical
@@ -644,7 +644,7 @@ mod tests {
 
     /// The canonical relay endpoint must equal exactly what a DIG Node dials by
     /// default. This pins the value byte-for-byte against `dig-node`'s
-    /// `relay::DEFAULT_RELAY_URL` (`wss://relay.dig.net:9450`) and the
+    /// `relay::DEFAULT_RELAY_URL` (`wss://relay.dig.net:443`) and the
     /// `dig-relay` server's documented client endpoint. If either side ever
     /// changes the scheme, host, or port, this guard fails so the shared
     /// contract can't silently drift.

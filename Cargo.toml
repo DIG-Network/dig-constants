@@ -21,6 +21,13 @@ sha2 = "0.10"
 #
 # Pinned to the chia-wallet-sdk 0.36.0 ceiling, NOT the newest on crates.io: the
 # SDK cannot reach the 0.48 primitives, so 0.36.0 is the coherent maximum here.
+#
+# The KAT compares against the DEPENDENCY's MAINNET_CONSTANTS/TESTNET11_CONSTANTS
+# rather than a local literal, so on its own it would agree with any self-consistent
+# wrong value. What closes that is the absolute literal pinned beside it in
+# src/lib.rs -- one side proves we match the SDK, the other proves the SDK's value
+# is the real genesis challenge. Neither is sufficient alone; do not delete either
+# as redundant. dig_ecosystem#3161.
 chia-sdk-types = "0.36.0"
 # bech32m decode KAT only (see tests): proves DIG_TREASURY_ADDRESS and
 # DIG_TREASURY_INNER_PUZZLE_HASH encode the same recipient. Dev-only so the

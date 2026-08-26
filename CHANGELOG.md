@@ -4,6 +4,11 @@ All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org) and
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## [0.11.2] - 2026-08-26
+
+### Chores
+- **deps:** Adopt the chia-sdk-types 0.36.0 ceiling (#16)
+
 ## [0.11.1] - 2026-08-24
 
 ### Documentation

@@ -346,10 +346,17 @@ instant itself is epoch **1**.
 `GENESIS + (epoch - 1) * EPOCH_LENGTH`.
 
 8d.4. The epoch number is an **input to coin identity**:
-`dig_mirror_coin::morph_store_launcher_id(launcher_id, epoch)` derives the hint under which a
-mirror coin is announced and found. A consumer computing a different epoch number does not
-merely mislabel — it creates or queries coins under a hint no peer uses, orphaning an epoch's
-coins. Consumers MUST use this clock and MUST NOT re-derive a genesis or a window length.
+`dig_mirror_coin::mirror_hint(store_launcher_id, root_hash, owner_puzzle_hash, epoch)` derives
+the hint under which a mirror coin is announced and found. A consumer computing a different
+epoch number does not merely mislabel — it creates or queries coins under a hint no peer uses,
+orphaning an epoch's coins. Consumers MUST use this clock and MUST NOT re-derive a genesis or a
+window length.
+
+8d.4.1. The epoch is one of **four** terms in that hint, not one of two. A two-term
+`morph(store, epoch)` under the same namespace tag is the pre-0.5.0 shape; it still exists in at
+least one unadopted implementation and produces a different, non-interoperable hint. Consumers
+MUST derive the hint by calling `dig-mirror-coin` rather than recomputing the morph locally, so
+that a shape change is a compile error rather than a silent empty query result.
 
 8d.5. This clock is NOT the `dig-epoch` crate, which defines L2 epoch geometry anchored to L1
 block heights with BlockProduction / Checkpoint / Finalization phases. The two notions share a

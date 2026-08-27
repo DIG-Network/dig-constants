@@ -708,11 +708,17 @@ pub const MIRROR_COIN_COLLATERAL_CAT_MOJOS: u64 = MIRROR_COIN_COLLATERAL_DIG * C
 // Mirror-coin epoch clock
 //
 // Mirror coins are scoped to an EPOCH: their on-chain hint is derived by
-// `dig_mirror_coin::morph_store_launcher_id(launcher_id, epoch)`, so the epoch
-// number is an INPUT TO COIN IDENTITY. A consumer that computes a different
-// epoch number than its peers does not merely display the wrong label — it
-// creates or looks up coins under a hint nobody else uses, silently orphaning
-// an entire epoch's coins.
+// `dig_mirror_coin::mirror_hint(store, root, owner_puzzle_hash, epoch)`, so the
+// epoch number is an INPUT TO COIN IDENTITY. A consumer that computes a
+// different epoch number than its peers does not merely display the wrong label
+// — it creates or looks up coins under a hint nobody else uses, silently
+// orphaning an entire epoch's coins.
+//
+// The epoch is one of FOUR terms there, not one of two. A two-term
+// `morph(store, epoch)` under the same namespace tag is the pre-0.5.0 shape and
+// yields a different hint; call `dig-mirror-coin` rather than recomputing the
+// morph, so a shape change surfaces as a compile error instead of an empty
+// query that looks like "no coins exist".
 //
 // The clock is therefore canonical here rather than re-derived per consumer.
 // Three readers must agree offline: dig-node (morphs the hint), the CLI
@@ -760,8 +766,8 @@ pub const MIRROR_ROUNDS_PER_EPOCH: i64 = MIRROR_EPOCH_LENGTH_MS / MIRROR_ROUND_L
 ///
 /// `floor((now - genesis) / 7 days) + 1`, so the epoch is **one-based**: the
 /// genesis instant itself is epoch **1**, not 0. The `+ 1` is not cosmetic —
-/// the epoch feeds `morph_store_launcher_id`, so an off-by-one puts every coin
-/// of an epoch under a hint nobody queries.
+/// the epoch feeds `dig_mirror_coin::mirror_hint`, so an off-by-one puts every
+/// coin of an epoch under a hint nobody queries.
 ///
 /// Instants before genesis yield zero or a negative number, matching the legacy
 /// JavaScript `Math.floor` semantics exactly (floored division, not truncated);
@@ -1364,8 +1370,8 @@ mod tests {
     /// implementation:
     ///
     /// - genesis itself → **1**; a zero-based clock (no `+ 1`) returns 0 here.
-    ///   The epoch feeds `morph_store_launcher_id`, so that off-by-one hides an
-    ///   entire epoch's coins under a hint nobody queries.
+    ///   The epoch feeds `dig_mirror_coin::mirror_hint`, so that off-by-one
+    ///   hides an entire epoch's coins under a hint nobody queries.
     /// - one millisecond BEFORE genesis → **0**; an implementation using Rust's
     ///   truncating `/` instead of floored `div_euclid` returns 1 here (−1 / 7d
     ///   truncates to 0, +1 = 1), silently colliding with real epoch 1. This is

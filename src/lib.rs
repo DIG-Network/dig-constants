@@ -638,6 +638,154 @@ pub const SYMMETRIC_KEY_LEN: usize = 32;
 /// (dig-account), not here.
 pub const PROFILE_SEALING_X25519_LABEL: &[u8] = b"dig-app:profile-sealing-x25519:v1";
 
+// =============================================================================
+// $DIG denomination
+//
+// $DIG is a CAT with THREE decimal places, so the smallest indivisible unit —
+// a "CAT mojo" — is one thousandth of a whole $DIG. Every amount that crosses
+// a wire, a coin, or a puzzle is expressed in CAT mojos; whole $DIG exists
+// only for display and for human-authored policy numbers.
+//
+// The two constants below exist so that no consumer ever writes a bare
+// `* 1000` next to a $DIG amount. A misplaced factor of a thousand in either
+// direction is a real-money bug, and the ecosystem has been bitten by an
+// amount whose unit was recorded nowhere near the literal (see the
+// mirror-coin collateral section below).
+// =============================================================================
+
+/// Number of decimal places $DIG carries as a CAT.
+///
+/// Whole $DIG × 10<sup>[`DIG_DECIMALS`]</sup> = CAT mojos. Pinned together with
+/// [`CAT_MOJOS_PER_DIG`] so the two can never disagree.
+pub const DIG_DECIMALS: u32 = 3;
+
+/// CAT mojos in one whole $DIG — i.e. 10<sup>[`DIG_DECIMALS`]</sup> = 1,000.
+///
+/// Multiply by this to convert whole $DIG to the CAT-mojo amounts that coins,
+/// puzzles, and wire messages carry; divide to render a whole-$DIG figure.
+pub const CAT_MOJOS_PER_DIG: u64 = 1_000;
+
+// =============================================================================
+// Mirror-coin collateral
+//
+// A DIG store mirror advertises itself on chain by locking collateral in a
+// mirror coin. The amount below is the ecosystem's CURRENT answer to "how much
+// is enough", read by three independent consumers that must agree:
+//
+//   - dig-node, which creates the mirror coin and must lock exactly this much
+//   - the DIG App, which displays the lock-up and computes a shortfall
+//   - the dig CLI, which audits existing mirror coins against it
+//
+// It is deliberately NOT a wire rule. `dig-mirror-coin` refuses to bake an
+// amount into the puzzle on the grounds that what amount is enough is an
+// economic question for the network; this constant is policy that can be
+// re-decided without a format change.
+//
+// The legacy system's equivalent was `const serverCoinCollateral = 300_000_000`
+// — 0.0003 XCH, drawn from an XCH wallet, with its unit stated nowhere near the
+// literal and the literal hand-copied into a second repo. The DIG figure below
+// differs from it in BOTH asset (CAT $DIG, not XCH) and magnitude, on purpose.
+// Do not "correct" it toward the legacy number.
+// =============================================================================
+
+/// Mirror-coin collateral per store, in **whole $DIG**: 20 $DIG.
+///
+/// The human-facing figure. Coins and wire messages carry
+/// [`MIRROR_COIN_COLLATERAL_CAT_MOJOS`]; the two are pinned to each other
+/// through [`CAT_MOJOS_PER_DIG`], so editing one without the other fails the
+/// crate's tests.
+pub const MIRROR_COIN_COLLATERAL_DIG: u64 = 20;
+
+/// Mirror-coin collateral per store, in **CAT mojos**: 20,000 mojos = 20 $DIG.
+///
+/// This is the amount a `MirrorAdvertisement`'s `collateral` field carries and
+/// the amount dig-node locks when it creates a mirror coin. The unit is CAT
+/// mojos — $DIG's smallest indivisible unit, one thousandth of a whole $DIG
+/// ([`CAT_MOJOS_PER_DIG`]) — NOT XCH mojos and NOT whole $DIG.
+pub const MIRROR_COIN_COLLATERAL_CAT_MOJOS: u64 =
+    MIRROR_COIN_COLLATERAL_DIG * CAT_MOJOS_PER_DIG;
+
+// =============================================================================
+// Mirror-coin epoch clock
+//
+// Mirror coins are scoped to an EPOCH: their on-chain hint is derived by
+// `dig_mirror_coin::morph_store_launcher_id(launcher_id, epoch)`, so the epoch
+// number is an INPUT TO COIN IDENTITY. A consumer that computes a different
+// epoch number than its peers does not merely display the wrong label — it
+// creates or looks up coins under a hint nobody else uses, silently orphaning
+// an entire epoch's coins.
+//
+// The clock is therefore canonical here rather than re-derived per consumer.
+// Three readers must agree offline: dig-node (morphs the hint), the CLI
+// (audits by epoch), and the DIG App (displays "collateralised for epoch N").
+//
+// It is a pure WALL-CLOCK schedule with NO chain input — a fixed UTC genesis
+// and a fixed 7-day window — which is exactly what lets those three agree
+// without coordinating. The definitive properties, preserved byte-for-byte
+// from the legacy `calculateEpochAndRound`:
+//
+//   genesis      2024-09-03T00:00:00Z
+//   epoch length 7 days, wall-clock UTC, hard-coded
+//   epoch number floor((now - genesis) / 7d) + 1   <- ONE-BASED
+//   round length 10 minutes (hence 1008 rounds per epoch)
+//
+// NOT to be confused with the `dig-epoch` crate, which defines L2 epoch
+// geometry anchored to L1 block heights with BlockProduction / Checkpoint /
+// Finalization phases. That is a genuinely different notion that happens to
+// share the word; adopting it here would change both the cadence and the
+// boundaries.
+// =============================================================================
+
+/// Genesis instant of the mirror-coin epoch clock, as Unix milliseconds:
+/// `2024-09-03T00:00:00Z`.
+///
+/// Epoch 1 begins at exactly this instant — see
+/// [`mirror_epoch_at_unix_ms`].
+pub const MIRROR_EPOCH_GENESIS_UNIX_MS: i64 = 1_725_321_600_000;
+
+/// Length of one mirror-coin epoch, in milliseconds: 7 days of wall-clock UTC.
+///
+/// Hard-coded, not derived from block interval or height.
+pub const MIRROR_EPOCH_LENGTH_MS: i64 = 7 * 24 * 60 * 60 * 1_000;
+
+/// Length of one mirror-coin round, in milliseconds: 10 minutes.
+pub const MIRROR_ROUND_LENGTH_MS: i64 = 10 * 60 * 1_000;
+
+/// Rounds in one mirror-coin epoch: 1008 (7 days ÷ 10 minutes).
+///
+/// Pinned against [`MIRROR_EPOCH_LENGTH_MS`] / [`MIRROR_ROUND_LENGTH_MS`] so
+/// the three cannot drift apart.
+pub const MIRROR_ROUNDS_PER_EPOCH: i64 = MIRROR_EPOCH_LENGTH_MS / MIRROR_ROUND_LENGTH_MS;
+
+/// The mirror-coin epoch number containing `now_unix_ms`.
+///
+/// `floor((now - genesis) / 7 days) + 1`, so the epoch is **one-based**: the
+/// genesis instant itself is epoch **1**, not 0. The `+ 1` is not cosmetic —
+/// the epoch feeds `morph_store_launcher_id`, so an off-by-one puts every coin
+/// of an epoch under a hint nobody queries.
+///
+/// Instants before genesis yield zero or a negative number, matching the legacy
+/// JavaScript `Math.floor` semantics exactly (floored division, not truncated);
+/// they are not a meaningful epoch and callers should not create coins for one.
+///
+/// ```
+/// use dig_constants::{mirror_epoch_at_unix_ms, MIRROR_EPOCH_GENESIS_UNIX_MS};
+/// assert_eq!(mirror_epoch_at_unix_ms(MIRROR_EPOCH_GENESIS_UNIX_MS), 1);
+/// ```
+#[must_use]
+pub const fn mirror_epoch_at_unix_ms(now_unix_ms: i64) -> i64 {
+    (now_unix_ms - MIRROR_EPOCH_GENESIS_UNIX_MS).div_euclid(MIRROR_EPOCH_LENGTH_MS) + 1
+}
+
+/// The Unix-millisecond instant at which `epoch` begins.
+///
+/// Inverse of [`mirror_epoch_at_unix_ms`] on the one-based numbering: epoch 1
+/// starts at [`MIRROR_EPOCH_GENESIS_UNIX_MS`].
+#[must_use]
+pub const fn mirror_epoch_start_unix_ms(epoch: i64) -> i64 {
+    MIRROR_EPOCH_GENESIS_UNIX_MS + (epoch - 1) * MIRROR_EPOCH_LENGTH_MS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1157,6 +1305,124 @@ mod tests {
             assert_eq!(c.agg_sig_puzzle_amount_additional_data, derived[3]);
             assert_eq!(c.agg_sig_parent_amount_additional_data, derived[4]);
             assert_eq!(c.agg_sig_parent_puzzle_additional_data, derived[5]);
+        }
+    }
+
+    /// Mirror-coin collateral: the whole-$DIG figure and the CAT-mojo figure
+    /// must stay in lock-step through the $DIG denomination.
+    ///
+    /// Both sides are also pinned to their literals, so that editing ONE of the
+    /// three (whole $DIG, mojos, or the decimal factor) without the others
+    /// fails — an equality written only in terms of the other constants would
+    /// survive scaling all of them together, which is precisely the
+    /// factor-of-a-thousand mistake this guards.
+    #[test]
+    fn mirror_collateral_is_20_dig_and_20_000_cat_mojos() {
+        assert_eq!(DIG_DECIMALS, 3, "$DIG is a 3-decimal CAT");
+        assert_eq!(CAT_MOJOS_PER_DIG, 1_000, "10^3 mojos per whole $DIG");
+        assert_eq!(CAT_MOJOS_PER_DIG, 10u64.pow(DIG_DECIMALS));
+
+        assert_eq!(MIRROR_COIN_COLLATERAL_DIG, 20, "20 whole $DIG per store");
+        assert_eq!(MIRROR_COIN_COLLATERAL_CAT_MOJOS, 20_000, "= 20,000 CAT mojos");
+        assert_eq!(
+            MIRROR_COIN_COLLATERAL_CAT_MOJOS,
+            MIRROR_COIN_COLLATERAL_DIG * CAT_MOJOS_PER_DIG
+        );
+
+        // The unit-confusion neighbours: the whole-$DIG figure is NOT the coin
+        // amount, and the legacy XCH-mojo literal (0.0003 XCH) is neither.
+        assert_ne!(MIRROR_COIN_COLLATERAL_CAT_MOJOS, MIRROR_COIN_COLLATERAL_DIG);
+        assert_ne!(MIRROR_COIN_COLLATERAL_CAT_MOJOS, 300_000_000);
+    }
+
+    /// The epoch genesis literal must be exactly `2024-09-03T00:00:00Z`.
+    ///
+    /// Recomputed from the Unix epoch rather than restated: 19,969 whole days
+    /// elapse between 1970-01-01 and 2024-09-03, so the instant is
+    /// 19_969 × 86_400 s = 1_725_321_600 s = 1_725_321_600_000 ms. A literal
+    /// asserted against itself would prove nothing.
+    #[test]
+    fn epoch_genesis_is_2024_09_03t00_00_00z() {
+        const DAYS_1970_TO_2024_09_03: i64 = 19_969;
+        assert_eq!(
+            MIRROR_EPOCH_GENESIS_UNIX_MS,
+            DAYS_1970_TO_2024_09_03 * 86_400 * 1_000
+        );
+        assert_eq!(MIRROR_EPOCH_LENGTH_MS, 604_800_000, "7 days in ms");
+        assert_eq!(MIRROR_ROUND_LENGTH_MS, 600_000, "10 minutes in ms");
+        assert_eq!(MIRROR_ROUNDS_PER_EPOCH, 1_008, "1008 ten-minute rounds per 7 days");
+    }
+
+    /// The epoch is ONE-BASED and its boundaries are exact.
+    ///
+    /// Each assertion is chosen to fail against a specific nearest-wrong
+    /// implementation:
+    ///
+    /// - genesis itself → **1**; a zero-based clock (no `+ 1`) returns 0 here.
+    ///   The epoch feeds `morph_store_launcher_id`, so that off-by-one hides an
+    ///   entire epoch's coins under a hint nobody queries.
+    /// - one millisecond BEFORE genesis → **0**; an implementation using Rust's
+    ///   truncating `/` instead of floored `div_euclid` returns 1 here (−1 / 7d
+    ///   truncates to 0, +1 = 1), silently colliding with real epoch 1. This is
+    ///   the assertion that pins JavaScript `Math.floor` parity.
+    /// - the last millisecond of epoch 1 → still **1**, and the first
+    ///   millisecond of epoch 2 → **2**; an inclusive/exclusive slip at the
+    ///   rollover fails exactly one of these two.
+    #[test]
+    fn epoch_boundaries_are_one_based_and_floored() {
+        let genesis = MIRROR_EPOCH_GENESIS_UNIX_MS;
+
+        assert_eq!(mirror_epoch_at_unix_ms(genesis), 1, "genesis is epoch 1");
+        assert_eq!(mirror_epoch_at_unix_ms(genesis - 1), 0, "pre-genesis floors down");
+        assert_eq!(
+            mirror_epoch_at_unix_ms(genesis + MIRROR_EPOCH_LENGTH_MS - 1),
+            1,
+            "last ms of epoch 1"
+        );
+        assert_eq!(
+            mirror_epoch_at_unix_ms(genesis + MIRROR_EPOCH_LENGTH_MS),
+            2,
+            "rollover instant belongs to epoch 2"
+        );
+    }
+
+    /// A known-good pair computed independently, by hand, against the legacy
+    /// `calculateEpochAndRound` formula.
+    ///
+    /// Instant: `2026-08-26T00:00:00Z` = 1_787_702_400 s.
+    ///   - 1_787_702_400 − 1_725_321_600 = 62_380_800 s elapsed since genesis
+    ///   - 62_380_800 / 86_400 = 722 whole days
+    ///   - 722 / 7 = 103.142… → `Math.floor` → 103
+    ///   - 103 + 1 = **epoch 104**
+    ///
+    /// The offset is deliberately NOT a whole multiple of 7 days (722 = 7×103
+    /// + 1), so the fractional part is real and a rounding error would show.
+    #[test]
+    fn epoch_matches_hand_computed_legacy_value() {
+        const AUG_26_2026_UNIX_MS: i64 = 1_787_702_400_000;
+        assert_eq!(
+            AUG_26_2026_UNIX_MS - MIRROR_EPOCH_GENESIS_UNIX_MS,
+            722 * 86_400 * 1_000,
+            "722 whole days since genesis"
+        );
+        assert_eq!(mirror_epoch_at_unix_ms(AUG_26_2026_UNIX_MS), 104);
+
+        // 722 days is one day INTO epoch 104, so the epoch is stable across
+        // that whole day but not across the following rollover.
+        assert_eq!(mirror_epoch_at_unix_ms(AUG_26_2026_UNIX_MS - 86_400_000), 104);
+        assert_eq!(mirror_epoch_at_unix_ms(AUG_26_2026_UNIX_MS - 86_400_000 - 1), 103);
+    }
+
+    /// [`mirror_epoch_start_unix_ms`] must invert [`mirror_epoch_at_unix_ms`]
+    /// on the one-based numbering: a start instant lands in its own epoch, and
+    /// the millisecond before it lands in the previous one.
+    #[test]
+    fn epoch_start_inverts_the_epoch_clock() {
+        assert_eq!(mirror_epoch_start_unix_ms(1), MIRROR_EPOCH_GENESIS_UNIX_MS);
+        for epoch in [1i64, 2, 104, 1_000] {
+            let start = mirror_epoch_start_unix_ms(epoch);
+            assert_eq!(mirror_epoch_at_unix_ms(start), epoch);
+            assert_eq!(mirror_epoch_at_unix_ms(start - 1), epoch - 1);
         }
     }
 }

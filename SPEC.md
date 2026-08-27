@@ -45,6 +45,16 @@ accompanied by a semver-major version bump.
 | `DIG_RELAY_URL` | `pub const &str` | Canonical NAT-traversal relay endpoint (§6) |
 | `DIG_NODE_PORT` | `pub const u16` | Default localhost port for client→node connection (§7) |
 | `DIG_ASSET_ID` | `pub const Bytes32` | Canonical $DIG CAT asset id (TAIL hash) (§8) |
+| `DIG_DECIMALS` | `pub const u32` | Decimal places $DIG carries as a CAT (§8b) |
+| `CAT_MOJOS_PER_DIG` | `pub const u64` | CAT mojos in one whole $DIG (§8b) |
+| `MIRROR_COIN_COLLATERAL_DIG` | `pub const u64` | Mirror-coin collateral per store, in whole $DIG (§8c) |
+| `MIRROR_COIN_COLLATERAL_CAT_MOJOS` | `pub const u64` | The same collateral, in CAT mojos — the amount coins carry (§8c) |
+| `MIRROR_EPOCH_GENESIS_UNIX_MS` | `pub const i64` | Genesis instant of the mirror-coin epoch clock (§8d) |
+| `MIRROR_EPOCH_LENGTH_MS` | `pub const i64` | Epoch length: 7 days of wall-clock UTC (§8d) |
+| `MIRROR_ROUND_LENGTH_MS` | `pub const i64` | Round length: 10 minutes (§8d) |
+| `MIRROR_ROUNDS_PER_EPOCH` | `pub const i64` | Rounds per epoch: 1008 (§8d) |
+| `mirror_epoch_at_unix_ms` | `const fn(i64) -> i64` | The one-based epoch number containing an instant (§8d) |
+| `mirror_epoch_start_unix_ms` | `const fn(i64) -> i64` | The instant at which a given epoch begins (§8d) |
 
 2.1. `NetworkConstants`'s field is private. Consumers MUST reach the underlying
 `ConsensusConstants` only via `consensus()`; the wrapper's accessors are the stable
@@ -267,9 +277,100 @@ in `dig-app` (`crates/dig-app-core/src/keystore/secrets.rs`) and `dig-session`
 (`src/unlocked.rs`, `derive_symmetric_key`). Both crates consume these constants from here rather
 than duplicating the literals.
 
+## 8b. $DIG denomination — `DIG_DECIMALS`, `CAT_MOJOS_PER_DIG`
+
+8b.1. $DIG is a CAT with **three** decimal places:
+
+```
+DIG_DECIMALS      = 3      (u32)
+CAT_MOJOS_PER_DIG = 1_000  (u64)   ==  10^DIG_DECIMALS
+```
+
+8b.2. Every $DIG amount that appears in a coin, a puzzle, or a wire message is expressed in
+**CAT mojos** — the smallest indivisible unit. Whole $DIG is a display and policy unit only.
+Conversion is `whole_dig * CAT_MOJOS_PER_DIG`.
+
+8b.3. Consumers MUST convert through `CAT_MOJOS_PER_DIG` rather than writing a bare factor of
+1000 beside an amount. A misplaced factor in either direction is a real-money defect.
+
+## 8c. Mirror-coin collateral — `MIRROR_COIN_COLLATERAL_DIG`, `MIRROR_COIN_COLLATERAL_CAT_MOJOS`
+
+8c.1. A DIG store mirror locks collateral in a mirror coin. The canonical amount is:
+
+```
+MIRROR_COIN_COLLATERAL_DIG       = 20       (u64, whole $DIG)
+MIRROR_COIN_COLLATERAL_CAT_MOJOS = 20_000   (u64, CAT mojos)  == 20 * CAT_MOJOS_PER_DIG
+```
+
+8c.2. `MIRROR_COIN_COLLATERAL_CAT_MOJOS` is the value a `MirrorAdvertisement`'s `collateral`
+field carries and the amount a node locks when creating a mirror coin. Its unit is CAT mojos —
+**not** XCH mojos and **not** whole $DIG.
+
+8c.3. This is network **policy**, not a wire rule. `dig-mirror-coin` deliberately bakes no
+amount into its puzzles; the amount here is the ecosystem's current answer and may be
+re-decided without a format change. Consumers MUST NOT encode a floor or a policy of their own.
+
+8c.4. Cross-repo conformance: dig-node (creation), the DIG App (display and shortfall) and the
+dig CLI (audit) all read this constant rather than a local literal.
+
+8c.5. The legacy system's equivalent locked 0.0003 XCH (300,000,000 XCH mojos). The DIG figure
+differs in both asset and magnitude, deliberately; it MUST NOT be reconciled toward the legacy
+literal.
+
+8c.6. Format contract: the test suite pins 20 and 20,000 to their literals AND to each other
+through `CAT_MOJOS_PER_DIG`, so editing one without the others fails.
+
+## 8d. Mirror-coin epoch clock — `MIRROR_EPOCH_*`, `MIRROR_ROUND*`, `mirror_epoch_*`
+
+8d.1. Mirror coins are scoped to an **epoch**, a pure wall-clock UTC schedule with no chain
+input:
+
+```
+MIRROR_EPOCH_GENESIS_UNIX_MS = 1_725_321_600_000   (2024-09-03T00:00:00Z)
+MIRROR_EPOCH_LENGTH_MS       =   604_800_000       (7 days, hard-coded)
+MIRROR_ROUND_LENGTH_MS       =       600_000       (10 minutes)
+MIRROR_ROUNDS_PER_EPOCH      =         1_008       ( == EPOCH / ROUND )
+```
+
+8d.2. Normative epoch rule — the epoch is **one-based**:
+
+```
+epoch(now_ms) = floor((now_ms - MIRROR_EPOCH_GENESIS_UNIX_MS) / MIRROR_EPOCH_LENGTH_MS) + 1
+```
+
+`floor` is floored division (Rust `div_euclid`), matching JavaScript `Math.floor`, so instants
+before genesis yield zero or a negative number rather than truncating toward zero. The genesis
+instant itself is epoch **1**.
+
+8d.3. `mirror_epoch_start_unix_ms(epoch)` is the exact inverse on that numbering:
+`GENESIS + (epoch - 1) * EPOCH_LENGTH`.
+
+8d.4. The epoch number is an **input to coin identity**:
+`dig_mirror_coin::mirror_hint(store_launcher_id, root_hash, owner_puzzle_hash, epoch)` derives
+the hint under which a mirror coin is announced and found. A consumer computing a different
+epoch number does not merely mislabel — it creates or queries coins under a hint no peer uses,
+orphaning an epoch's coins. Consumers MUST use this clock and MUST NOT re-derive a genesis or a
+window length.
+
+8d.4.1. The epoch is one of **four** terms in that hint, not one of two. A two-term
+`morph(store, epoch)` under the same namespace tag is the pre-0.5.0 shape; it still exists in at
+least one unadopted implementation and produces a different, non-interoperable hint. Consumers
+MUST derive the hint by calling `dig-mirror-coin` rather than recomputing the morph locally, so
+that a shape change is a compile error rather than a silent empty query result.
+
+8d.5. This clock is NOT the `dig-epoch` crate, which defines L2 epoch geometry anchored to L1
+block heights with BlockProduction / Checkpoint / Finalization phases. The two notions share a
+word only; `dig-epoch` MUST NOT be substituted here.
+
+8d.6. Format contract: the test suite pins the genesis instant by recomputing it from the Unix
+epoch, and pins the boundaries at genesis, one millisecond before genesis, the last millisecond
+of an epoch, and the rollover instant, plus a hand-computed known-good pair.
+
 ## 9. Invariants and error behavior
 
 9.1. The crate has no fallible API: no function returns `Result`, panics, or performs I/O.
+The two epoch `const fn`s are total arithmetic over `i64` wall-clock milliseconds; they can
+overflow only for inputs far outside any representable date.
 All values are compile-time constants; misuse is impossible at runtime.
 
 9.2. Invariants that MUST hold in every release:
@@ -284,10 +385,17 @@ All values are compile-time constants; misuse is impossible at runtime.
 - I-6: `DIG_NODE_PORT == 9778` (the default localhost port; until a coordinated cross-repo
   change per §7).
 - I-7: the `chia-consensus`/`chia-protocol` dependency versions move in lockstep (currently
-  the `0.26` line); a `ConsensusConstants` layout change upstream is a breaking change here
+  the `0.36` line); a `ConsensusConstants` layout change upstream is a breaking change here
   and requires a semver-major bump.
 - I-8: `DIG_ASSET_ID` equals the pinned $DIG CAT tail hash (§8.1; until a coordinated
   cross-repo change per §8.4).
+- I-9: `CAT_MOJOS_PER_DIG == 10^DIG_DECIMALS`, and
+  `MIRROR_COIN_COLLATERAL_CAT_MOJOS == MIRROR_COIN_COLLATERAL_DIG * CAT_MOJOS_PER_DIG`
+  (§8b, §8c).
+- I-10: `mirror_epoch_at_unix_ms(MIRROR_EPOCH_GENESIS_UNIX_MS) == 1` — the epoch numbering is
+  one-based (§8d.2).
+- I-11: `MIRROR_ROUNDS_PER_EPOCH == MIRROR_EPOCH_LENGTH_MS / MIRROR_ROUND_LENGTH_MS == 1008`
+  (§8d.1).
 
 ## 10. Versioning and compatibility
 
@@ -328,3 +436,4 @@ tags and manual dispatch.
 | C-10 | Crate stays dependency-light (no CLVM engine / networking / async runtime) | MUST |
 | C-11 | Release publishes only after fmt/clippy/test/doc gates pass | MUST |
 | C-12 | `DIG_ASSET_ID` byte-identical to `chip35_dl_coin::DIG_ASSET_ID` (the $DIG CAT tail hash) | MUST |
+

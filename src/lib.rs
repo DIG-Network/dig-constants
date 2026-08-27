@@ -702,8 +702,7 @@ pub const MIRROR_COIN_COLLATERAL_DIG: u64 = 20;
 /// the amount dig-node locks when it creates a mirror coin. The unit is CAT
 /// mojos — $DIG's smallest indivisible unit, one thousandth of a whole $DIG
 /// ([`CAT_MOJOS_PER_DIG`]) — NOT XCH mojos and NOT whole $DIG.
-pub const MIRROR_COIN_COLLATERAL_CAT_MOJOS: u64 =
-    MIRROR_COIN_COLLATERAL_DIG * CAT_MOJOS_PER_DIG;
+pub const MIRROR_COIN_COLLATERAL_CAT_MOJOS: u64 = MIRROR_COIN_COLLATERAL_DIG * CAT_MOJOS_PER_DIG;
 
 // =============================================================================
 // Mirror-coin epoch clock
@@ -1323,7 +1322,10 @@ mod tests {
         assert_eq!(CAT_MOJOS_PER_DIG, 10u64.pow(DIG_DECIMALS));
 
         assert_eq!(MIRROR_COIN_COLLATERAL_DIG, 20, "20 whole $DIG per store");
-        assert_eq!(MIRROR_COIN_COLLATERAL_CAT_MOJOS, 20_000, "= 20,000 CAT mojos");
+        assert_eq!(
+            MIRROR_COIN_COLLATERAL_CAT_MOJOS, 20_000,
+            "= 20,000 CAT mojos"
+        );
         assert_eq!(
             MIRROR_COIN_COLLATERAL_CAT_MOJOS,
             MIRROR_COIN_COLLATERAL_DIG * CAT_MOJOS_PER_DIG
@@ -1350,7 +1352,10 @@ mod tests {
         );
         assert_eq!(MIRROR_EPOCH_LENGTH_MS, 604_800_000, "7 days in ms");
         assert_eq!(MIRROR_ROUND_LENGTH_MS, 600_000, "10 minutes in ms");
-        assert_eq!(MIRROR_ROUNDS_PER_EPOCH, 1_008, "1008 ten-minute rounds per 7 days");
+        assert_eq!(
+            MIRROR_ROUNDS_PER_EPOCH, 1_008,
+            "1008 ten-minute rounds per 7 days"
+        );
     }
 
     /// The epoch is ONE-BASED and its boundaries are exact.
@@ -1373,7 +1378,11 @@ mod tests {
         let genesis = MIRROR_EPOCH_GENESIS_UNIX_MS;
 
         assert_eq!(mirror_epoch_at_unix_ms(genesis), 1, "genesis is epoch 1");
-        assert_eq!(mirror_epoch_at_unix_ms(genesis - 1), 0, "pre-genesis floors down");
+        assert_eq!(
+            mirror_epoch_at_unix_ms(genesis - 1),
+            0,
+            "pre-genesis floors down"
+        );
         assert_eq!(
             mirror_epoch_at_unix_ms(genesis + MIRROR_EPOCH_LENGTH_MS - 1),
             1,
@@ -1409,8 +1418,14 @@ mod tests {
 
         // 722 days is one day INTO epoch 104, so the epoch is stable across
         // that whole day but not across the following rollover.
-        assert_eq!(mirror_epoch_at_unix_ms(AUG_26_2026_UNIX_MS - 86_400_000), 104);
-        assert_eq!(mirror_epoch_at_unix_ms(AUG_26_2026_UNIX_MS - 86_400_000 - 1), 103);
+        assert_eq!(
+            mirror_epoch_at_unix_ms(AUG_26_2026_UNIX_MS - 86_400_000),
+            104
+        );
+        assert_eq!(
+            mirror_epoch_at_unix_ms(AUG_26_2026_UNIX_MS - 86_400_000 - 1),
+            103
+        );
     }
 
     /// [`mirror_epoch_start_unix_ms`] must invert [`mirror_epoch_at_unix_ms`]

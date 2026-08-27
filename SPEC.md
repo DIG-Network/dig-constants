@@ -328,3 +328,4 @@ tags and manual dispatch.
 | C-10 | Crate stays dependency-light (no CLVM engine / networking / async runtime) | MUST |
 | C-11 | Release publishes only after fmt/clippy/test/doc gates pass | MUST |
 | C-12 | `DIG_ASSET_ID` byte-identical to `chip35_dl_coin::DIG_ASSET_ID` (the $DIG CAT tail hash) | MUST |
+

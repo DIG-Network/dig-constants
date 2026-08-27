@@ -4,6 +4,11 @@ All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org) and
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## [0.12.0] - 2026-08-27
+
+### Features
+- **mirror-coin:** Canonical collateral amount and 7-day epoch clock (#18)
+
 ## [0.11.2] - 2026-08-26
 
 ### Chores

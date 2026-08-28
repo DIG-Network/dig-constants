@@ -649,8 +649,7 @@ pub const PROFILE_SEALING_X25519_LABEL: &[u8] = b"dig-app:profile-sealing-x25519
 // The two constants below exist so that no consumer ever writes a bare
 // `* 1000` next to a $DIG amount. A misplaced factor of a thousand in either
 // direction is a real-money bug, and the ecosystem has been bitten by an
-// amount whose unit was recorded nowhere near the literal (see the
-// mirror-coin collateral section below).
+// amount whose unit was recorded nowhere near the literal.
 // =============================================================================
 
 /// Number of decimal places $DIG carries as a CAT.
@@ -666,43 +665,22 @@ pub const DIG_DECIMALS: u32 = 3;
 pub const CAT_MOJOS_PER_DIG: u64 = 1_000;
 
 // =============================================================================
-// Mirror-coin collateral
+// Mirror-coin collateral is NOT a constant — do not add one here
 //
 // A DIG store mirror advertises itself on chain by locking collateral in a
-// mirror coin. The amount below is the ecosystem's CURRENT answer to "how much
-// is enough", read by three independent consumers that must agree:
+// mirror coin, but HOW MUCH is not a fixed figure and never belongs in this
+// crate. The requirement is DERIVED PER EPOCH by `dig-mirror-collateral`
+// (`required_per_store`, in DIG mojos) from the network's own state, so it
+// moves in both directions as that state moves.
 //
-//   - dig-node, which creates the mirror coin and must lock exactly this much
-//   - the DIG App, which displays the lock-up and computes a shortfall
-//   - the dig CLI, which audits existing mirror coins against it
+// This crate previously carried a fixed `MIRROR_COIN_COLLATERAL_DIG = 20`
+// (removed in 0.13.0). It had no consumers and it contradicted the model by a
+// factor of twenty on a real-money path — the derived requirement at genesis is
+// 1 $DIG. A reader who trusted the constant would have locked 20x the right
+// amount with nothing to tell them otherwise.
 //
-// It is deliberately NOT a wire rule. `dig-mirror-coin` refuses to bake an
-// amount into the puzzle on the grounds that what amount is enough is an
-// economic question for the network; this constant is policy that can be
-// re-decided without a format change.
-//
-// The legacy system's equivalent was `const serverCoinCollateral = 300_000_000`
-// — 0.0003 XCH, drawn from an XCH wallet, with its unit stated nowhere near the
-// literal and the literal hand-copied into a second repo. The DIG figure below
-// differs from it in BOTH asset (CAT $DIG, not XCH) and magnitude, on purpose.
-// Do not "correct" it toward the legacy number.
+// Ask `dig-mirror-collateral` for the requirement. Do not restate it.
 // =============================================================================
-
-/// Mirror-coin collateral per store, in **whole $DIG**: 20 $DIG.
-///
-/// The human-facing figure. Coins and wire messages carry
-/// [`MIRROR_COIN_COLLATERAL_CAT_MOJOS`]; the two are pinned to each other
-/// through [`CAT_MOJOS_PER_DIG`], so editing one without the other fails the
-/// crate's tests.
-pub const MIRROR_COIN_COLLATERAL_DIG: u64 = 20;
-
-/// Mirror-coin collateral per store, in **CAT mojos**: 20,000 mojos = 20 $DIG.
-///
-/// This is the amount a `MirrorAdvertisement`'s `collateral` field carries and
-/// the amount dig-node locks when it creates a mirror coin. The unit is CAT
-/// mojos — $DIG's smallest indivisible unit, one thousandth of a whole $DIG
-/// ([`CAT_MOJOS_PER_DIG`]) — NOT XCH mojos and NOT whole $DIG.
-pub const MIRROR_COIN_COLLATERAL_CAT_MOJOS: u64 = MIRROR_COIN_COLLATERAL_DIG * CAT_MOJOS_PER_DIG;
 
 // =============================================================================
 // Mirror-coin epoch clock
@@ -1313,34 +1291,22 @@ mod tests {
         }
     }
 
-    /// Mirror-coin collateral: the whole-$DIG figure and the CAT-mojo figure
-    /// must stay in lock-step through the $DIG denomination.
+    /// The $DIG denomination: both constants pinned to their literals AND to
+    /// each other.
     ///
-    /// Both sides are also pinned to their literals, so that editing ONE of the
-    /// three (whole $DIG, mojos, or the decimal factor) without the others
-    /// fails — an equality written only in terms of the other constants would
-    /// survive scaling all of them together, which is precisely the
+    /// Each side is asserted against its own literal as well as against the
+    /// relation, because an equality written only in terms of the other
+    /// constant survives scaling both of them together — which is precisely the
     /// factor-of-a-thousand mistake this guards.
     #[test]
-    fn mirror_collateral_is_20_dig_and_20_000_cat_mojos() {
+    fn dig_is_a_three_decimal_cat_with_1000_mojos_per_whole_dig() {
         assert_eq!(DIG_DECIMALS, 3, "$DIG is a 3-decimal CAT");
         assert_eq!(CAT_MOJOS_PER_DIG, 1_000, "10^3 mojos per whole $DIG");
         assert_eq!(CAT_MOJOS_PER_DIG, 10u64.pow(DIG_DECIMALS));
 
-        assert_eq!(MIRROR_COIN_COLLATERAL_DIG, 20, "20 whole $DIG per store");
-        assert_eq!(
-            MIRROR_COIN_COLLATERAL_CAT_MOJOS, 20_000,
-            "= 20,000 CAT mojos"
-        );
-        assert_eq!(
-            MIRROR_COIN_COLLATERAL_CAT_MOJOS,
-            MIRROR_COIN_COLLATERAL_DIG * CAT_MOJOS_PER_DIG
-        );
-
-        // The unit-confusion neighbours: the whole-$DIG figure is NOT the coin
-        // amount, and the legacy XCH-mojo literal (0.0003 XCH) is neither.
-        assert_ne!(MIRROR_COIN_COLLATERAL_CAT_MOJOS, MIRROR_COIN_COLLATERAL_DIG);
-        assert_ne!(MIRROR_COIN_COLLATERAL_CAT_MOJOS, 300_000_000);
+        // The unit-confusion neighbour: the legacy XCH-mojo collateral literal
+        // (300_000_000 = 0.0003 XCH) is not a $DIG figure and never was.
+        assert_ne!(CAT_MOJOS_PER_DIG, 300_000_000);
     }
 
     /// The epoch genesis literal must be exactly `2024-09-03T00:00:00Z`.

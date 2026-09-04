@@ -631,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "dig-constants"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "bech32",
  "chia-consensus",
